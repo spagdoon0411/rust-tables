@@ -1,3 +1,5 @@
+mod tables;
+
 use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
@@ -36,6 +38,9 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     }
+
+    let col_schema = tables::ColumnSchema::new("col1", tables::ColumnType::String);
+    let tab_schema = tables::TableSchema::new("tab1", vec![col_schema]);
 
     // TODO: enter primary application
 
