@@ -1,35 +1,41 @@
 use std::collections::HashMap;
 use uuid;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct TableSchema {
+    pub id: TableId,
     pub name: String,
     pub columns: Vec<ColumnSchema>,
 }
 
-impl TableSchema {
-    pub fn new(name: impl Into<String>, columns: Vec<ColumnSchema>) -> Self {
-        Self {
-            name: name.into(),
-            columns,
+impl std::fmt::Debug for TableSchema {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "Table: id={} name={}", self.id.0, self.name)?;
+        for (i, column) in self.columns.iter().enumerate() {
+            if i > 0 {
+                writeln!(f)?;
+            }
+            write!(f, "\t{column:?}")?;
         }
+        Ok(())
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ColumnSchema {
     pub id: ColumnId,
+    pub table_id: TableId,
     pub name: String,
     pub ty: ColumnType,
 }
 
-impl ColumnSchema {
-    pub fn new(name: impl Into<String>, ty: ColumnType) -> Self {
-        Self {
-            id: ColumnId::new(),
-            name: name.into(),
-            ty,
-        }
+impl std::fmt::Debug for ColumnSchema {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Column: id={} table_id={} name={} type={}",
+            self.id.0, self.table_id.0, self.name, self.ty
+        )
     }
 }
 
@@ -40,22 +46,19 @@ pub enum ColumnType {
     Boolean,
     Real,
     DateTime,
-    Reference { table: String },
-    Select { options: Vec<SelectOption> },
 }
 
-#[derive(Debug, Clone)]
-pub struct SelectOption {
-    pub id: OptionId,
-    pub label: String,
-}
+impl std::fmt::Display for ColumnType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            ColumnType::String => "String",
+            ColumnType::Integer => "Integer",
+            ColumnType::Boolean => "Boolean",
+            ColumnType::Real => "Real",
+            ColumnType::DateTime => "Datetime",
+        };
 
-impl SelectOption {
-    pub fn new(label: impl Into<String>) -> Self {
-        Self {
-            id: OptionId::new(),
-            label: label.into(),
-        }
+        f.write_str(s)
     }
 }
 
@@ -122,33 +125,68 @@ mod tests {
 
     #[test]
     fn table_schema_new_sets_fields_and_generates_unique_column_ids() {
-        let reps = ColumnSchema::new("reps", ColumnType::Integer);
-        let sets = ColumnSchema::new("sets", ColumnType::Integer);
-        let exercise = ColumnSchema::new("exercise", ColumnType::String);
+        let table_id = TableId::new();
+        let reps = ColumnSchema {
+            id: ColumnId::new(),
+            table_id: table_id.clone(),
+            name: "reps".into(),
+            ty: ColumnType::Integer,
+        };
+        let sets = ColumnSchema {
+            id: ColumnId::new(),
+            table_id: table_id.clone(),
+            name: "sets".into(),
+            ty: ColumnType::Integer,
+        };
+        let exercise = ColumnSchema {
+            id: ColumnId::new(),
+            table_id: table_id.clone(),
+            name: "exercise".into(),
+            ty: ColumnType::String,
+        };
 
         assert_eq!(reps.name, "reps");
         assert!(matches!(reps.ty, ColumnType::Integer));
+        assert_eq!(reps.table_id, table_id);
         assert_ne!(reps.id.0, sets.id.0);
         assert_ne!(reps.id.0, exercise.id.0);
 
-        let table_schema = TableSchema::new(
-            "workouts",
-            vec![reps.clone(), sets.clone(), exercise.clone()],
-        );
+        let table_schema = TableSchema {
+            id: table_id.clone(),
+            name: "workouts".into(),
+            columns: vec![reps.clone(), sets.clone(), exercise.clone()],
+        };
 
+        assert_eq!(table_schema.id, table_id);
         assert_eq!(table_schema.name, "workouts");
         assert_eq!(table_schema.columns.len(), 3);
     }
 
     #[test]
     fn row_holds_a_value_per_column() {
-        let reps = ColumnSchema::new("reps", ColumnType::Integer);
-        let sets = ColumnSchema::new("sets", ColumnType::Integer);
-        let exercise = ColumnSchema::new("exercise", ColumnType::String);
+        let table_id = TableId::new();
+        let reps = ColumnSchema {
+            id: ColumnId::new(),
+            table_id: table_id.clone(),
+            name: "reps".into(),
+            ty: ColumnType::Integer,
+        };
+        let sets = ColumnSchema {
+            id: ColumnId::new(),
+            table_id: table_id.clone(),
+            name: "sets".into(),
+            ty: ColumnType::Integer,
+        };
+        let exercise = ColumnSchema {
+            id: ColumnId::new(),
+            table_id: table_id.clone(),
+            name: "exercise".into(),
+            ty: ColumnType::String,
+        };
 
         let row = Row {
             id: RowId::new(),
-            table: TableId::new(),
+            table: table_id,
             values: HashMap::from([
                 (reps.id.clone(), Value::Integer(10)),
                 (sets.id.clone(), Value::Integer(3)),

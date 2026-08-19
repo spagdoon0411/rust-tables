@@ -1,11 +1,134 @@
+use anyhow::Context;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool};
 use sqlx::{Pool, Sqlite};
+use std::fmt::Display;
 use std::fs;
 use std::io::{self, BufRead, Write};
 use std::path::Path;
 
+use crate::tables::{ColumnId, ColumnSchema, ColumnType, TableId};
+
 const USER_DATA_DIR: &str = "user_data";
 const DB_FILENAME: &str = "fitness_tracker.db";
+
+// Storage for a user table schema
+pub struct TableSchemaRow {
+    pub table_id: TableId,
+    pub name: String,
+}
+
+// ColumnSchemaRow: Encodes the column-belongs-to-table relation.
+// ColumnSchemaRow would be identical to the ColumnSchema domain type;
+// reuse the struct in the database layer.
+
+/// Creates the `table_schemas` and `column_schemas` tables if they don't
+/// already exist. `column_schemas` rows reference their owning table with
+/// `ON DELETE CASCADE`, so deleting a table schema also deletes its columns.
+async fn create_schema_tables(pool: &Pool<Sqlite>) -> anyhow::Result<()> {
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS table_schemas (
+            id TEXT PRIMARY KEY NOT NULL,
+            name TEXT NOT NULL
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS column_schemas (
+            id TEXT PRIMARY KEY NOT NULL,
+            table_id TEXT NOT NULL REFERENCES table_schemas(id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            ty TEXT NOT NULL
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+/// Creates a new table schema named `name` with a default "Name" column,
+/// persists both to the database, and returns the resulting table schema
+/// row.
+pub async fn create_table(
+    pool: &Pool<Sqlite>,
+    name: impl Into<String>,
+) -> anyhow::Result<TableSchemaRow> {
+    let table_id = TableId::new();
+    let name = name.into();
+
+    sqlx::query("INSERT INTO table_schemas (id, name) VALUES (?, ?)")
+        .bind(table_id.0.to_string())
+        .bind(&name)
+        .execute(pool)
+        .await?;
+
+    let name_column = ColumnSchema {
+        id: ColumnId::new(),
+        table_id: table_id.clone(),
+        name: "Name".into(),
+        ty: ColumnType::String,
+    };
+
+    sqlx::query("INSERT INTO column_schemas (id, table_id, name, ty) VALUES (?, ?, ?, ?)")
+        .bind(name_column.id.0.to_string())
+        .bind(name_column.table_id.0.to_string())
+        .bind(&name_column.name)
+        .bind(&name_column.ty.to_string())
+        .execute(pool)
+        .await?;
+
+    Ok(TableSchemaRow { table_id, name })
+}
+
+/// Deletes the table schema for `id`. Cascades to delete its column schemas
+/// via the `ON DELETE CASCADE` foreign key. Returns an error if no table
+/// schema exists for `id`.
+pub async fn delete_table(pool: &Pool<Sqlite>, id: &TableId) -> anyhow::Result<()> {
+    let result = sqlx::query("DELETE FROM table_schemas WHERE id = ?")
+        .bind(id.0.to_string())
+        .execute(pool)
+        .await?;
+
+    if result.rows_affected() == 0 {
+        anyhow::bail!("no table schema found for id {}", id.0);
+    }
+
+    Ok(())
+}
+
+/// Creates a column associated with a table with the given name and type.
+pub async fn create_column(
+    pool: &Pool<Sqlite>,
+    table_id: &TableId,
+    name: impl Into<String> + Display,
+    ty: ColumnType,
+) -> anyhow::Result<ColumnSchema> {
+    let column_id = ColumnId::new();
+    let name = name.into();
+
+    sqlx::query("INSERT INTO column_schemas (id, table_id, name, ty) VALUES (?, ?, ?, ?)")
+        .bind(column_id.0.to_string())
+        .bind(table_id.0.to_string())
+        .bind(&name)
+        .bind(ty.to_string())
+        .execute(pool)
+        .await
+        .with_context(|| {
+            format!(
+                "creating new column {} in table with id {}",
+                name, table_id.0
+            )
+        })?;
+
+    Ok(ColumnSchema {
+        id: column_id,
+        table_id: table_id.clone(),
+        name,
+        ty,
+    })
+}
 
 /// Verifies (or creates, with user consent) `base_dir`. Returns whether the
 /// directory was freshly created by this call.
@@ -54,9 +177,12 @@ async fn open_db(base_dir: &Path, allow_create: bool) -> anyhow::Result<Pool<Sql
 
     let options = SqliteConnectOptions::new()
         .filename(&db_path)
-        .create_if_missing(allow_create);
+        .create_if_missing(allow_create)
+        .pragma("foreign_keys", "ON");
 
     let pool = SqlitePool::connect_with(options).await?;
+
+    create_schema_tables(&pool).await?;
 
     Ok(pool)
 }
@@ -158,5 +284,90 @@ mod tests {
         let err = result.expect_err("expected missing database to error");
         let message = err.to_string();
         assert!(message.contains("Delete or move"));
+    }
+
+    // Creating a table adds a default "Name" column; deleting it cascades to
+    // remove that column too; deleting the (now-nonexistent) table again
+    // errors.
+    #[tokio::test]
+    async fn table_create_then_delete_lifecycle() {
+        let dir = tempfile::tempdir().unwrap();
+        let base_dir = dir.path().join("user_data");
+        fs::create_dir(&base_dir).unwrap();
+        let pool = open_db(&base_dir, true).await.unwrap();
+
+        let table = create_table(&pool, "workouts").await.unwrap();
+        assert_eq!(table.name, "workouts");
+
+        let (name_column_count,): (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM column_schemas WHERE table_id = ? AND name = ?")
+                .bind(table.table_id.0.to_string())
+                .bind("Name")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(name_column_count, 1);
+
+        delete_table(&pool, &table.table_id).await.unwrap();
+
+        let (table_count,): (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM table_schemas WHERE id = ?")
+                .bind(table.table_id.0.to_string())
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(table_count, 0);
+
+        let (column_count,): (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM column_schemas WHERE table_id = ?")
+                .bind(table.table_id.0.to_string())
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(column_count, 0);
+
+        let result = delete_table(&pool, &table.table_id).await;
+        assert!(result.is_err());
+
+        pool.close().await;
+    }
+
+    // Creating a column on a preexisting table persists it alongside the
+    // default "Name" column.
+    #[tokio::test]
+    async fn create_column_persists_column_on_existing_table() {
+        let dir = tempfile::tempdir().unwrap();
+        let base_dir = dir.path().join("user_data");
+        fs::create_dir(&base_dir).unwrap();
+        let pool = open_db(&base_dir, true).await.unwrap();
+
+        let table = create_table(&pool, "workouts").await.unwrap();
+
+        let column = create_column(&pool, &table.table_id, "reps", ColumnType::Integer)
+            .await
+            .unwrap();
+
+        assert_eq!(column.table_id, table.table_id);
+        assert_eq!(column.name, "reps");
+        assert!(matches!(column.ty, ColumnType::Integer));
+
+        let (name, ty): (String, String) =
+            sqlx::query_as("SELECT name, ty FROM column_schemas WHERE id = ?")
+                .bind(column.id.0.to_string())
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(name, "reps");
+        assert_eq!(ty, ColumnType::Integer.to_string());
+
+        let (column_count,): (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM column_schemas WHERE table_id = ?")
+                .bind(table.table_id.0.to_string())
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(column_count, 2);
+
+        pool.close().await;
     }
 }
