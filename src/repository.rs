@@ -17,9 +17,23 @@ pub struct TableSchemaRow {
     pub name: String,
 }
 
+impl TableSchemaRow {
+    /// The physical SQLite table name backing this table: `<name>-<id>`.
+    fn sql_name(&self) -> String {
+        format!("{}-{}", self.name, self.table_id.0)
+    }
+}
+
 // ColumnSchemaRow: Encodes the column-belongs-to-table relation.
 // ColumnSchemaRow would be identical to the ColumnSchema domain type;
 // reuse the struct in the database layer.
+
+/// Quotes `ident` as a SQLite identifier, escaping embedded quotes. Needed
+/// because table/column names are interpolated into SQL (SQLite doesn't
+/// support binding identifiers as query parameters).
+fn quote_ident(ident: &str) -> String {
+    format!("\"{}\"", ident.replace('"', "\"\""))
+}
 
 /// Creates the `table_schemas` and `column_schemas` tables if they don't
 /// already exist. `column_schemas` rows reference their owning table with
@@ -58,15 +72,28 @@ pub async fn create_table(
     let table_id = TableId::new();
     let name = name.into();
 
+    let mut tx = pool.begin().await?;
+
     sqlx::query("INSERT INTO table_schemas (id, name) VALUES (?, ?)")
         .bind(table_id.0.to_string())
         .bind(&name)
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
+
+    let table = TableSchemaRow { table_id, name };
+    let table_sql_name = table.sql_name();
+
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "CREATE TABLE {} (id TEXT PRIMARY KEY)",
+        quote_ident(&table_sql_name)
+    )))
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("creating physical table {table_sql_name}"))?;
 
     let name_column = ColumnSchema {
         id: ColumnId::new(),
-        table_id: table_id.clone(),
+        table_id: table.table_id.clone(),
         name: "Name".into(),
         ty: ColumnType::String,
     };
@@ -76,24 +103,63 @@ pub async fn create_table(
         .bind(name_column.table_id.0.to_string())
         .bind(&name_column.name)
         .bind(&name_column.ty.to_string())
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
 
-    Ok(TableSchemaRow { table_id, name })
+    let column_sql_name = name_column.sql_name();
+
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "ALTER TABLE {} ADD COLUMN {} {}",
+        quote_ident(&table_sql_name),
+        quote_ident(&column_sql_name),
+        name_column.ty.sql_type()
+    )))
+    .execute(&mut *tx)
+    .await
+    .with_context(|| {
+        format!("adding physical column {column_sql_name} to physical table {table_sql_name}")
+    })?;
+
+    tx.commit().await?;
+
+    Ok(table)
 }
 
 /// Deletes the table schema for `id`. Cascades to delete its column schemas
-/// via the `ON DELETE CASCADE` foreign key. Returns an error if no table
-/// schema exists for `id`.
+/// via the `ON DELETE CASCADE` foreign key, and drops the physical SQLite
+/// table backing it. Returns an error if no table schema exists for `id`.
 pub async fn delete_table(pool: &Pool<Sqlite>, id: &TableId) -> anyhow::Result<()> {
-    let result = sqlx::query("DELETE FROM table_schemas WHERE id = ?")
+    let mut tx = pool.begin().await?;
+
+    let name: Option<String> = sqlx::query_scalar("SELECT name FROM table_schemas WHERE id = ?")
         .bind(id.0.to_string())
-        .execute(pool)
+        .fetch_optional(&mut *tx)
         .await?;
 
-    if result.rows_affected() == 0 {
+    let Some(name) = name else {
         anyhow::bail!("no table schema found for id {}", id.0);
-    }
+    };
+
+    sqlx::query("DELETE FROM table_schemas WHERE id = ?")
+        .bind(id.0.to_string())
+        .execute(&mut *tx)
+        .await?;
+
+    let table = TableSchemaRow {
+        table_id: id.clone(),
+        name,
+    };
+    let table_sql_name = table.sql_name();
+
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "DROP TABLE {}",
+        quote_ident(&table_sql_name)
+    )))
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("dropping physical table {table_sql_name}"))?;
+
+    tx.commit().await?;
 
     Ok(())
 }
@@ -108,12 +174,20 @@ pub async fn create_column(
     let column_id = ColumnId::new();
     let name = name.into();
 
+    let mut tx = pool.begin().await?;
+
+    let table_name: String = sqlx::query_scalar("SELECT name FROM table_schemas WHERE id = ?")
+        .bind(table_id.0.to_string())
+        .fetch_one(&mut *tx)
+        .await
+        .with_context(|| format!("looking up table with id {}", table_id.0))?;
+
     sqlx::query("INSERT INTO column_schemas (id, table_id, name, ty) VALUES (?, ?, ?, ?)")
         .bind(column_id.0.to_string())
         .bind(table_id.0.to_string())
         .bind(&name)
         .bind(ty.to_string())
-        .execute(pool)
+        .execute(&mut *tx)
         .await
         .with_context(|| {
             format!(
@@ -122,12 +196,35 @@ pub async fn create_column(
             )
         })?;
 
-    Ok(ColumnSchema {
+    let column = ColumnSchema {
         id: column_id,
         table_id: table_id.clone(),
         name,
         ty,
-    })
+    };
+
+    let table = TableSchemaRow {
+        table_id: table_id.clone(),
+        name: table_name,
+    };
+    let table_sql_name = table.sql_name();
+    let column_sql_name = column.sql_name();
+
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "ALTER TABLE {} ADD COLUMN {} {}",
+        quote_ident(&table_sql_name),
+        quote_ident(&column_sql_name),
+        column.ty.sql_type()
+    )))
+    .execute(&mut *tx)
+    .await
+    .with_context(|| {
+        format!("adding physical column {column_sql_name} to physical table {table_sql_name}")
+    })?;
+
+    tx.commit().await?;
+
+    Ok(column)
 }
 
 /// Verifies (or creates, with user consent) `base_dir`. Returns whether the
@@ -308,7 +405,25 @@ mod tests {
                 .unwrap();
         assert_eq!(name_column_count, 1);
 
+        let table_sql_name = table.sql_name();
+
+        let (physical_table_count,): (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?")
+                .bind(&table_sql_name)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(physical_table_count, 1);
+
         delete_table(&pool, &table.table_id).await.unwrap();
+
+        let (physical_table_count,): (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?")
+                .bind(&table_sql_name)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(physical_table_count, 0);
 
         let (table_count,): (i64,) =
             sqlx::query_as("SELECT COUNT(*) FROM table_schemas WHERE id = ?")
@@ -359,6 +474,19 @@ mod tests {
                 .unwrap();
         assert_eq!(name, "reps");
         assert_eq!(ty, ColumnType::Integer.to_string());
+
+        let table_sql_name = table.sql_name();
+        let column_sql_name = column.sql_name();
+
+        let (physical_column_count,): (i64,) = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "SELECT COUNT(*) FROM pragma_table_info('{}') WHERE name = ?",
+            table_sql_name.replace('\'', "''")
+        )))
+        .bind(&column_sql_name)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(physical_column_count, 1);
 
         let (column_count,): (i64,) =
             sqlx::query_as("SELECT COUNT(*) FROM column_schemas WHERE table_id = ?")

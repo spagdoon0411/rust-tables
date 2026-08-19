@@ -39,6 +39,15 @@ impl std::fmt::Debug for ColumnSchema {
     }
 }
 
+impl ColumnSchema {
+    /// The physical SQLite column name backing this column: `<name>-<id>`.
+    /// Suffixing with the id keeps the identifier unique even if the
+    /// user-facing name is reused or later renamed.
+    pub fn sql_name(&self) -> String {
+        format!("{}-{}", self.name, self.id.0)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum ColumnType {
     String,
@@ -46,6 +55,19 @@ pub enum ColumnType {
     Boolean,
     Real,
     DateTime,
+}
+
+impl ColumnType {
+    /// The SQLite storage type used for columns of this type.
+    pub fn sql_type(&self) -> &'static str {
+        match self {
+            ColumnType::String => "TEXT",
+            ColumnType::Integer => "INTEGER",
+            ColumnType::Boolean => "INTEGER",
+            ColumnType::Real => "REAL",
+            ColumnType::DateTime => "TEXT",
+        }
+    }
 }
 
 impl std::fmt::Display for ColumnType {
