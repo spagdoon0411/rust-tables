@@ -4,16 +4,49 @@ mod transactions;
 mod ui;
 
 use crate::ui::{AppState, HomePage, RenderableAppPage};
-use crossterm::event::EventStream;
+use crossterm::{
+    event::{
+        EventStream, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
+        PushKeyboardEnhancementFlags,
+    },
+    execute,
+    terminal::supports_keyboard_enhancement,
+};
 use sqlx::{Pool, Sqlite};
-use std::process::ExitCode;
+use std::{io::stdout, process::ExitCode};
 use tokio::time::{self, Duration};
 use ui::AppEvent;
+
+/// Enables terminal-specific input/output enhancements where supported, returning
+/// whether they were enabled so the caller can undo them symmetrically on shutdown.
+fn terminal_specific_config() -> anyhow::Result<bool> {
+    // The Kitty keyboard protocol reports Escape unambiguously, letting supporting
+    // terminals skip the escape-sequence disambiguation delay entirely.
+    let keyboard_enhancement_supported = supports_keyboard_enhancement().unwrap_or(false);
+    if keyboard_enhancement_supported {
+        execute!(
+            stdout(),
+            PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+        )?;
+    }
+    Ok(keyboard_enhancement_supported)
+}
+
+/// Undoes the enhancements enabled by `terminal_specific_config`, given whether they
+/// were enabled.
+fn terminal_specific_cleanup(keyboard_enhancement_supported: bool) -> anyhow::Result<()> {
+    if keyboard_enhancement_supported {
+        execute!(stdout(), PopKeyboardEnhancementFlags)?;
+    }
+    Ok(())
+}
 
 /// Primary application, evolving valid initial user data according to terminal input.
 async fn app(pool: &Pool<Sqlite>) -> anyhow::Result<()> {
     let mut event_stream = EventStream::new();
     let mut terminal = ratatui::init();
+    let keyboard_enhancement_supported = terminal_specific_config()?;
+
     let mut app_state = AppState::HomePage(HomePage::new());
     let mut tick = time::interval(Duration::from_millis(100));
 
@@ -37,6 +70,7 @@ async fn app(pool: &Pool<Sqlite>) -> anyhow::Result<()> {
         app_state = app_state.transition_app_state(&app_event, &mut terminal)?;
     }
 
+    terminal_specific_cleanup(keyboard_enhancement_supported)?;
     ratatui::restore(); // Return user's terminal to original state
     Ok(())
 }
