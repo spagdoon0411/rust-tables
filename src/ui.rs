@@ -1,3 +1,5 @@
+use std::mem::discriminant;
+
 use anyhow::Context;
 use ratatui::{
     DefaultTerminal, Frame,
@@ -40,13 +42,10 @@ pub enum UserAction {
 pub trait RenderableAppPage {
     fn draw(&mut self, frame: &mut Frame);
     fn collect_action(&mut self, terminal: &mut DefaultTerminal) -> anyhow::Result<UserAction>;
-    /// Reacts to a previously-collected action. Returns `Some(state)` when the
-    /// action should transition the app to a different page.
-    fn respond_to_action(
-        &mut self,
-        action: &UserAction,
-        terminal: &mut DefaultTerminal,
-    ) -> anyhow::Result<Option<AppState>>;
+
+    /// Consumes the current page and produces the next `AppState`, either with the same
+    /// page type with possibly mutated fields or of a different page type.
+    fn derive_next_app_state(self, action: &UserAction) -> anyhow::Result<AppState>;
 }
 
 pub enum AppState {
@@ -72,14 +71,10 @@ impl RenderableAppPage for AppState {
         }
     }
 
-    fn respond_to_action(
-        &mut self,
-        action: &UserAction,
-        terminal: &mut DefaultTerminal,
-    ) -> anyhow::Result<Option<AppState>> {
+    fn derive_next_app_state(self, action: &UserAction) -> anyhow::Result<AppState> {
         match self {
-            AppState::HomePage(page) => page.respond_to_action(action, terminal),
-            AppState::TablePage(page) => page.respond_to_action(action, terminal),
+            AppState::HomePage(page) => page.derive_next_app_state(action),
+            AppState::TablePage(page) => page.derive_next_app_state(action),
             AppState::Exited => anyhow::bail!("should not have encountered Exited app state"),
         }
     }
@@ -87,13 +82,17 @@ impl RenderableAppPage for AppState {
 
 impl AppState {
     pub fn transition_app_state(
-        &mut self,
-        next_state: AppState,
+        self,
+        action: &UserAction,
         terminal: &mut DefaultTerminal,
-    ) -> anyhow::Result<()> {
-        terminal.clear().context("while clearing terminal")?;
-        *self = next_state;
-        Ok(())
+    ) -> anyhow::Result<AppState> {
+        let current_kind = discriminant(&self);
+        let next_state = self.derive_next_app_state(action)?;
+        let next_kind = discriminant(&next_state);
+        if next_kind != current_kind {
+            terminal.clear().context("while clearing terminal")?;
+        }
+        Ok(next_state)
     }
 }
 
@@ -222,21 +221,17 @@ impl RenderableAppPage for HomePage {
         })
     }
 
-    fn respond_to_action(
-        &mut self,
-        action: &UserAction,
-        _terminal: &mut DefaultTerminal,
-    ) -> anyhow::Result<Option<AppState>> {
+    fn derive_next_app_state(mut self, action: &UserAction) -> anyhow::Result<AppState> {
         match action {
             UserAction::Scroll(ScrollDirection::Up | ScrollDirection::Down) => {
                 self.list_state.select(Some(self.selected));
-                Ok(None)
+                Ok(AppState::HomePage(self))
             }
             UserAction::ViewTable { table } => {
-                Ok(Some(AppState::TablePage(TablePage::new(table.id.clone()))))
+                Ok(AppState::TablePage(TablePage::new(table.id.clone())))
             }
-            UserAction::Escape => Ok(Some(AppState::Exited)),
-            _ => Ok(None),
+            UserAction::Escape => Ok(AppState::Exited),
+            _ => Ok(AppState::HomePage(self)),
         }
     }
 }
@@ -298,14 +293,10 @@ impl RenderableAppPage for TablePage {
         })
     }
 
-    fn respond_to_action(
-        &mut self,
-        action: &UserAction,
-        _terminal: &mut DefaultTerminal,
-    ) -> anyhow::Result<Option<AppState>> {
+    fn derive_next_app_state(self, action: &UserAction) -> anyhow::Result<AppState> {
         Ok(match action {
-            UserAction::Escape => Some(AppState::HomePage(HomePage::new())),
-            _ => None,
+            UserAction::Escape => AppState::HomePage(HomePage::new()),
+            _ => AppState::TablePage(self),
         })
     }
 }

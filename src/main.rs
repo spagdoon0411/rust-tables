@@ -1,5 +1,6 @@
 mod repository;
 mod tables;
+mod transactions;
 mod ui;
 
 use crate::ui::{AppState, HomePage, RenderableAppPage};
@@ -26,13 +27,8 @@ fn app(pool: &Pool<Sqlite>) -> anyhow::Result<()> {
 
         // TODO: route actions through transaction/api layer here for "approval"
 
-        // Apply intra-page transition function
-        let next_state = app_state.respond_to_action(&action, &mut terminal)?;
-
-        // Apply inter-page transition function
-        if let Some(next_state) = next_state {
-            app_state.transition_app_state(next_state, &mut terminal)?;
-        }
+        // Transition app state, clearing the terminal when necessary
+        app_state = app_state.transition_app_state(&action, &mut terminal)?;
     }
 
     ratatui::restore(); // Return user's terminal to original state
