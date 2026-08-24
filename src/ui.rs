@@ -280,7 +280,7 @@ impl RenderableAppPage for HomePage {
                     },
                     None => UserActionEvent::NoAction,
                 },
-                KeyCode::Esc => UserActionEvent::Escape,
+                KeyCode::Char('q') | KeyCode::Esc => UserActionEvent::Escape,
                 _ => UserActionEvent::NoAction,
             },
             _ => UserActionEvent::NoAction,
