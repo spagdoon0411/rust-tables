@@ -1,9 +1,11 @@
 use std::mem::discriminant;
 
 use anyhow::Context;
+use crossterm::event::EventStream;
+use futures_util::StreamExt;
 use ratatui::{
     DefaultTerminal, Frame,
-    crossterm::event::{self, Event, KeyCode, KeyEventKind},
+    crossterm::event::{Event, KeyCode, KeyEventKind},
     layout::{Alignment, Constraint, Flex, Layout, Rect},
     widgets::{Block, List, ListState, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
 };
@@ -39,14 +41,29 @@ pub enum UserActionEvent {
     NoAction,
 }
 
+pub enum AsyncMessageEvent {}
+
+pub enum TickEvent {}
+
+// Each page chooses what leaf event types to subscribe to through transition_app_state.
+// Irrelevant events are dropped, allowing a new page to discard obsolete async
+// messages from an old page, for instance.
+pub enum AppEvent {
+    UserAction(UserActionEvent),
+    AsyncMessage(AsyncMessageEvent),
+    Tick(TickEvent),
+}
+
 pub trait RenderableAppPage {
     fn draw(&mut self, frame: &mut Frame);
-    fn collect_action(&mut self, terminal: &mut DefaultTerminal)
-    -> anyhow::Result<UserActionEvent>;
+    async fn collect_action(
+        &mut self,
+        event_stream: &mut EventStream,
+    ) -> anyhow::Result<UserActionEvent>;
 
     /// Consumes the current page and produces the next `AppState`, either with the same
     /// page type with possibly mutated fields or of a different page type.
-    fn derive_next_app_state(self, action: &UserActionEvent) -> anyhow::Result<AppState>;
+    fn derive_next_app_state(self, app_event: &AppEvent) -> anyhow::Result<AppState>;
 }
 
 pub enum AppState {
@@ -64,21 +81,21 @@ impl RenderableAppPage for AppState {
         }
     }
 
-    fn collect_action(
+    async fn collect_action(
         &mut self,
-        terminal: &mut DefaultTerminal,
+        event_stream: &mut EventStream,
     ) -> anyhow::Result<UserActionEvent> {
         match self {
-            AppState::HomePage(page) => page.collect_action(terminal),
-            AppState::TablePage(page) => page.collect_action(terminal),
+            AppState::HomePage(page) => page.collect_action(event_stream).await,
+            AppState::TablePage(page) => page.collect_action(event_stream).await,
             AppState::Exited => anyhow::bail!("should not have encountered Exited app state"),
         }
     }
 
-    fn derive_next_app_state(self, action: &UserActionEvent) -> anyhow::Result<AppState> {
+    fn derive_next_app_state(self, app_event: &AppEvent) -> anyhow::Result<AppState> {
         match self {
-            AppState::HomePage(page) => page.derive_next_app_state(action),
-            AppState::TablePage(page) => page.derive_next_app_state(action),
+            AppState::HomePage(page) => page.derive_next_app_state(app_event),
+            AppState::TablePage(page) => page.derive_next_app_state(app_event),
             AppState::Exited => anyhow::bail!("should not have encountered Exited app state"),
         }
     }
@@ -87,11 +104,12 @@ impl RenderableAppPage for AppState {
 impl AppState {
     pub fn transition_app_state(
         self,
-        action: &UserActionEvent,
+        app_event: &AppEvent,
         terminal: &mut DefaultTerminal,
     ) -> anyhow::Result<AppState> {
         let current_kind = discriminant(&self);
-        let next_state = self.derive_next_app_state(action)?;
+
+        let next_state = self.derive_next_app_state(app_event)?;
         let next_kind = discriminant(&next_state);
         if next_kind != current_kind {
             terminal.clear().context("while clearing terminal")?;
@@ -199,11 +217,15 @@ impl RenderableAppPage for HomePage {
         Self::draw_list(frame, list_area, names, &mut self.list_state);
     }
 
-    fn collect_action(
+    async fn collect_action(
         &mut self,
-        _terminal: &mut DefaultTerminal,
+        event_stream: &mut EventStream,
     ) -> anyhow::Result<UserActionEvent> {
-        let reading = event::read().context("reading terminal input")?;
+        let reading = event_stream
+            .next()
+            .await
+            .context("event stream ended")?
+            .context("reading terminal input")?;
 
         Ok(match reading {
             Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
@@ -228,17 +250,20 @@ impl RenderableAppPage for HomePage {
         })
     }
 
-    fn derive_next_app_state(mut self, action: &UserActionEvent) -> anyhow::Result<AppState> {
-        match action {
-            UserActionEvent::Scroll(ScrollDirection::Up | ScrollDirection::Down) => {
-                self.list_state.select(Some(self.selected));
-                Ok(AppState::HomePage(self))
-            }
-            UserActionEvent::ViewTable { table } => {
-                Ok(AppState::TablePage(TablePage::new(table.id.clone())))
-            }
-            UserActionEvent::Escape => Ok(AppState::Exited),
-            _ => Ok(AppState::HomePage(self)),
+    fn derive_next_app_state(mut self, app_event: &AppEvent) -> anyhow::Result<AppState> {
+        match app_event {
+            AppEvent::UserAction(action) => match action {
+                UserActionEvent::Scroll(ScrollDirection::Up | ScrollDirection::Down) => {
+                    self.list_state.select(Some(self.selected));
+                    Ok(AppState::HomePage(self))
+                }
+                UserActionEvent::ViewTable { table } => {
+                    Ok(AppState::TablePage(TablePage::new(table.id.clone())))
+                }
+                UserActionEvent::Escape => Ok(AppState::Exited),
+                _ => Ok(AppState::HomePage(self)),
+            },
+            _ => todo!("neither app ticks nor async events are supported yet"),
         }
     }
 }
@@ -279,11 +304,15 @@ impl RenderableAppPage for TablePage {
         );
     }
 
-    fn collect_action(
+    async fn collect_action(
         &mut self,
-        _terminal: &mut DefaultTerminal,
+        event_stream: &mut EventStream,
     ) -> anyhow::Result<UserActionEvent> {
-        let reading = event::read().context("reading terminal input")?;
+        let reading = event_stream
+            .next()
+            .await
+            .context("event stream ended")?
+            .context("reading terminal input")?;
 
         Ok(match reading {
             Event::Key(key) if key.kind == KeyEventKind::Press => {
@@ -309,10 +338,13 @@ impl RenderableAppPage for TablePage {
         })
     }
 
-    fn derive_next_app_state(self, action: &UserActionEvent) -> anyhow::Result<AppState> {
-        Ok(match action {
-            UserActionEvent::Escape => AppState::HomePage(HomePage::new()),
-            _ => AppState::TablePage(self),
-        })
+    fn derive_next_app_state(self, app_event: &AppEvent) -> anyhow::Result<AppState> {
+        match app_event {
+            AppEvent::UserAction(action) => match action {
+                UserActionEvent::Escape => Ok(AppState::HomePage(HomePage::new())),
+                _ => Ok(AppState::TablePage(self)),
+            },
+            _ => todo!("neither app ticks nor async messages are supported yet"),
+        }
     }
 }

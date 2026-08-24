@@ -4,11 +4,14 @@ mod transactions;
 mod ui;
 
 use crate::ui::{AppState, HomePage, RenderableAppPage};
+use crossterm::event::EventStream;
 use sqlx::{Pool, Sqlite};
 use std::process::ExitCode;
+use ui::AppEvent;
 
 /// Primary application, evolving valid initial user data according to terminal input.
-fn app(pool: &Pool<Sqlite>) -> anyhow::Result<()> {
+async fn app(pool: &Pool<Sqlite>) -> anyhow::Result<()> {
+    let mut event_stream = EventStream::new();
     let mut terminal = ratatui::init();
     let mut app_state = AppState::HomePage(HomePage::new());
 
@@ -22,13 +25,11 @@ fn app(pool: &Pool<Sqlite>) -> anyhow::Result<()> {
         // Project app state onto terminal
         terminal.draw(|frame| app_state.draw(frame))?;
 
-        // Poll for actions -- TODO: listen for events instead?
-        let action = app_state.collect_action(&mut terminal)?;
-
-        // TODO: route actions through transaction/api layer here for "approval"
+        // Poll for actions
+        let app_event = AppEvent::UserAction(app_state.collect_action(&mut event_stream).await?);
 
         // Transition app state, clearing the terminal when necessary
-        app_state = app_state.transition_app_state(&action, &mut terminal)?;
+        app_state = app_state.transition_app_state(&app_event, &mut terminal)?;
     }
 
     ratatui::restore(); // Return user's terminal to original state
@@ -47,7 +48,7 @@ async fn main() -> ExitCode {
     };
 
     // Application acts on valid user data
-    match app(&db) {
+    match app(&db).await {
         Ok(_) => ExitCode::SUCCESS,
         Err(_) => ExitCode::FAILURE,
     }
