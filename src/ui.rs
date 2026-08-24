@@ -43,27 +43,44 @@ pub enum UserActionEvent {
 
 pub enum AsyncMessageEvent {}
 
-pub enum TickEvent {}
-
 // Each page chooses what leaf event types to subscribe to through transition_app_state.
 // Irrelevant events are dropped, allowing a new page to discard obsolete async
 // messages from an old page, for instance.
 pub enum AppEvent {
     UserAction(UserActionEvent),
     AsyncMessage(AsyncMessageEvent),
-    Tick(TickEvent),
+    Tick,
 }
 
-pub trait RenderableAppPage {
+/// An app state that can be projected onto a UI page. Note that the Exited state
+/// cannot be projected.
+pub trait RenderableAppPage: Into<AppState> + Sized {
     fn draw(&mut self, frame: &mut Frame);
+
+    /// Default tick behavior is consumption without side effects. Override this function
+    /// on a page to produce more dynamic behavior.
+    fn on_tick(self) -> anyhow::Result<AppState> {
+        Ok(self.into())
+    }
+
     async fn collect_action(
         &mut self,
         event_stream: &mut EventStream,
     ) -> anyhow::Result<UserActionEvent>;
 
-    /// Consumes the current page and produces the next `AppState`, either with the same
-    /// page type with possibly mutated fields or of a different page type.
-    fn derive_next_app_state(self, app_event: &AppEvent) -> anyhow::Result<AppState>;
+    /// Consumes the current page and produces the next `AppState` in response to a
+    /// non-tick event, either with the same page type with possibly mutated fields or
+    /// of a different page type.
+    fn derive_next_app_state_for_event(self, app_event: &AppEvent) -> anyhow::Result<AppState>;
+
+    /// Single point of maintenance for tick vs. non-tick dispatch. Override `on_tick` on
+    /// a page for custom tick behavior rather than overriding this.
+    fn derive_next_app_state(self, app_event: &AppEvent) -> anyhow::Result<AppState> {
+        match app_event {
+            AppEvent::Tick => self.on_tick(),
+            _ => self.derive_next_app_state_for_event(app_event),
+        }
+    }
 }
 
 pub enum AppState {
@@ -92,12 +109,32 @@ impl RenderableAppPage for AppState {
         }
     }
 
-    fn derive_next_app_state(self, app_event: &AppEvent) -> anyhow::Result<AppState> {
+    fn on_tick(self) -> anyhow::Result<AppState> {
         match self {
-            AppState::HomePage(page) => page.derive_next_app_state(app_event),
-            AppState::TablePage(page) => page.derive_next_app_state(app_event),
+            AppState::HomePage(page) => page.on_tick(),
+            AppState::TablePage(page) => page.on_tick(),
+            AppState::Exited => Ok(AppState::Exited),
+        }
+    }
+
+    fn derive_next_app_state_for_event(self, app_event: &AppEvent) -> anyhow::Result<AppState> {
+        match self {
+            AppState::HomePage(page) => page.derive_next_app_state_for_event(app_event),
+            AppState::TablePage(page) => page.derive_next_app_state_for_event(app_event),
             AppState::Exited => anyhow::bail!("should not have encountered Exited app state"),
         }
+    }
+}
+
+impl From<HomePage> for AppState {
+    fn from(page: HomePage) -> Self {
+        AppState::HomePage(page)
+    }
+}
+
+impl From<TablePage> for AppState {
+    fn from(page: TablePage) -> Self {
+        AppState::TablePage(page)
     }
 }
 
@@ -250,7 +287,7 @@ impl RenderableAppPage for HomePage {
         })
     }
 
-    fn derive_next_app_state(mut self, app_event: &AppEvent) -> anyhow::Result<AppState> {
+    fn derive_next_app_state_for_event(mut self, app_event: &AppEvent) -> anyhow::Result<AppState> {
         match app_event {
             AppEvent::UserAction(action) => match action {
                 UserActionEvent::Scroll(ScrollDirection::Up | ScrollDirection::Down) => {
@@ -263,7 +300,7 @@ impl RenderableAppPage for HomePage {
                 UserActionEvent::Escape => Ok(AppState::Exited),
                 _ => Ok(AppState::HomePage(self)),
             },
-            _ => todo!("neither app ticks nor async events are supported yet"),
+            _ => todo!("async messages are not supported yet"),
         }
     }
 }
@@ -338,13 +375,13 @@ impl RenderableAppPage for TablePage {
         })
     }
 
-    fn derive_next_app_state(self, app_event: &AppEvent) -> anyhow::Result<AppState> {
+    fn derive_next_app_state_for_event(self, app_event: &AppEvent) -> anyhow::Result<AppState> {
         match app_event {
             AppEvent::UserAction(action) => match action {
                 UserActionEvent::Escape => Ok(AppState::HomePage(HomePage::new())),
                 _ => Ok(AppState::TablePage(self)),
             },
-            _ => todo!("neither app ticks nor async messages are supported yet"),
+            _ => todo!("async messages are not supported yet"),
         }
     }
 }

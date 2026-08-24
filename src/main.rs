@@ -7,6 +7,7 @@ use crate::ui::{AppState, HomePage, RenderableAppPage};
 use crossterm::event::EventStream;
 use sqlx::{Pool, Sqlite};
 use std::process::ExitCode;
+use tokio::time::{self, Duration};
 use ui::AppEvent;
 
 /// Primary application, evolving valid initial user data according to terminal input.
@@ -14,6 +15,7 @@ async fn app(pool: &Pool<Sqlite>) -> anyhow::Result<()> {
     let mut event_stream = EventStream::new();
     let mut terminal = ratatui::init();
     let mut app_state = AppState::HomePage(HomePage::new());
+    let mut tick = time::interval(Duration::from_millis(100));
 
     loop {
         // Terminal states are never projected to the terminal and never
@@ -26,7 +28,10 @@ async fn app(pool: &Pool<Sqlite>) -> anyhow::Result<()> {
         terminal.draw(|frame| app_state.draw(frame))?;
 
         // Poll for actions
-        let app_event = AppEvent::UserAction(app_state.collect_action(&mut event_stream).await?);
+        let app_event = tokio::select! {
+            _ = tick.tick() => AppEvent::Tick,
+            action = app_state.collect_action(&mut event_stream) => AppEvent::UserAction(action?),
+        };
 
         // Transition app state, clearing the terminal when necessary
         app_state = app_state.transition_app_state(&app_event, &mut terminal)?;
