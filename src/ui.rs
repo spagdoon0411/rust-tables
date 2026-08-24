@@ -19,7 +19,7 @@ pub enum ScrollDirection {
 
 /// Actions that can be collected by a UI. Typically validated by a transaction/api
 /// layer, but can be short-circuited (e.g., scrolling touches no persistent data).
-pub enum UserAction {
+pub enum UserActionEvent {
     Scroll(ScrollDirection),
     DeleteTable {
         table: TableSchema,
@@ -41,11 +41,12 @@ pub enum UserAction {
 
 pub trait RenderableAppPage {
     fn draw(&mut self, frame: &mut Frame);
-    fn collect_action(&mut self, terminal: &mut DefaultTerminal) -> anyhow::Result<UserAction>;
+    fn collect_action(&mut self, terminal: &mut DefaultTerminal)
+    -> anyhow::Result<UserActionEvent>;
 
     /// Consumes the current page and produces the next `AppState`, either with the same
     /// page type with possibly mutated fields or of a different page type.
-    fn derive_next_app_state(self, action: &UserAction) -> anyhow::Result<AppState>;
+    fn derive_next_app_state(self, action: &UserActionEvent) -> anyhow::Result<AppState>;
 }
 
 pub enum AppState {
@@ -63,7 +64,10 @@ impl RenderableAppPage for AppState {
         }
     }
 
-    fn collect_action(&mut self, terminal: &mut DefaultTerminal) -> anyhow::Result<UserAction> {
+    fn collect_action(
+        &mut self,
+        terminal: &mut DefaultTerminal,
+    ) -> anyhow::Result<UserActionEvent> {
         match self {
             AppState::HomePage(page) => page.collect_action(terminal),
             AppState::TablePage(page) => page.collect_action(terminal),
@@ -71,7 +75,7 @@ impl RenderableAppPage for AppState {
         }
     }
 
-    fn derive_next_app_state(self, action: &UserAction) -> anyhow::Result<AppState> {
+    fn derive_next_app_state(self, action: &UserActionEvent) -> anyhow::Result<AppState> {
         match self {
             AppState::HomePage(page) => page.derive_next_app_state(action),
             AppState::TablePage(page) => page.derive_next_app_state(action),
@@ -83,7 +87,7 @@ impl RenderableAppPage for AppState {
 impl AppState {
     pub fn transition_app_state(
         self,
-        action: &UserAction,
+        action: &UserActionEvent,
         terminal: &mut DefaultTerminal,
     ) -> anyhow::Result<AppState> {
         let current_kind = discriminant(&self);
@@ -195,42 +199,45 @@ impl RenderableAppPage for HomePage {
         Self::draw_list(frame, list_area, names, &mut self.list_state);
     }
 
-    fn collect_action(&mut self, _terminal: &mut DefaultTerminal) -> anyhow::Result<UserAction> {
+    fn collect_action(
+        &mut self,
+        _terminal: &mut DefaultTerminal,
+    ) -> anyhow::Result<UserActionEvent> {
         let reading = event::read().context("reading terminal input")?;
 
         Ok(match reading {
             Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
                 KeyCode::Char('k') | KeyCode::Up => {
                     self.selected = self.selected.checked_sub(1).unwrap_or(self.selected);
-                    UserAction::Scroll(ScrollDirection::Up)
+                    UserActionEvent::Scroll(ScrollDirection::Up)
                 }
                 KeyCode::Char('j') | KeyCode::Down => {
                     self.selected = (self.selected + 1).min(self.tables.len().saturating_sub(1));
-                    UserAction::Scroll(ScrollDirection::Down)
+                    UserActionEvent::Scroll(ScrollDirection::Down)
                 }
                 KeyCode::Enter => match self.tables.get(self.selected) {
-                    Some(table) => UserAction::ViewTable {
+                    Some(table) => UserActionEvent::ViewTable {
                         table: table.clone(),
                     },
-                    None => UserAction::NoAction,
+                    None => UserActionEvent::NoAction,
                 },
-                KeyCode::Esc => UserAction::Escape,
-                _ => UserAction::NoAction,
+                KeyCode::Esc => UserActionEvent::Escape,
+                _ => UserActionEvent::NoAction,
             },
-            _ => UserAction::NoAction,
+            _ => UserActionEvent::NoAction,
         })
     }
 
-    fn derive_next_app_state(mut self, action: &UserAction) -> anyhow::Result<AppState> {
+    fn derive_next_app_state(mut self, action: &UserActionEvent) -> anyhow::Result<AppState> {
         match action {
-            UserAction::Scroll(ScrollDirection::Up | ScrollDirection::Down) => {
+            UserActionEvent::Scroll(ScrollDirection::Up | ScrollDirection::Down) => {
                 self.list_state.select(Some(self.selected));
                 Ok(AppState::HomePage(self))
             }
-            UserAction::ViewTable { table } => {
+            UserActionEvent::ViewTable { table } => {
                 Ok(AppState::TablePage(TablePage::new(table.id.clone())))
             }
-            UserAction::Escape => Ok(AppState::Exited),
+            UserActionEvent::Escape => Ok(AppState::Exited),
             _ => Ok(AppState::HomePage(self)),
         }
     }
@@ -272,30 +279,39 @@ impl RenderableAppPage for TablePage {
         );
     }
 
-    fn collect_action(&mut self, _terminal: &mut DefaultTerminal) -> anyhow::Result<UserAction> {
+    fn collect_action(
+        &mut self,
+        _terminal: &mut DefaultTerminal,
+    ) -> anyhow::Result<UserActionEvent> {
         let reading = event::read().context("reading terminal input")?;
 
         Ok(match reading {
             Event::Key(key) if key.kind == KeyEventKind::Press => {
                 self.last_key = Some(key.code);
                 match key.code {
-                    KeyCode::Char('h') | KeyCode::Left => UserAction::Scroll(ScrollDirection::Left),
-                    KeyCode::Char('j') | KeyCode::Down => UserAction::Scroll(ScrollDirection::Down),
-                    KeyCode::Char('k') | KeyCode::Up => UserAction::Scroll(ScrollDirection::Up),
-                    KeyCode::Char('l') | KeyCode::Right => {
-                        UserAction::Scroll(ScrollDirection::Right)
+                    KeyCode::Char('h') | KeyCode::Left => {
+                        UserActionEvent::Scroll(ScrollDirection::Left)
                     }
-                    KeyCode::Esc => UserAction::Escape,
-                    _ => UserAction::NoAction,
+                    KeyCode::Char('j') | KeyCode::Down => {
+                        UserActionEvent::Scroll(ScrollDirection::Down)
+                    }
+                    KeyCode::Char('k') | KeyCode::Up => {
+                        UserActionEvent::Scroll(ScrollDirection::Up)
+                    }
+                    KeyCode::Char('l') | KeyCode::Right => {
+                        UserActionEvent::Scroll(ScrollDirection::Right)
+                    }
+                    KeyCode::Esc => UserActionEvent::Escape,
+                    _ => UserActionEvent::NoAction,
                 }
             }
-            _ => UserAction::NoAction,
+            _ => UserActionEvent::NoAction,
         })
     }
 
-    fn derive_next_app_state(self, action: &UserAction) -> anyhow::Result<AppState> {
+    fn derive_next_app_state(self, action: &UserActionEvent) -> anyhow::Result<AppState> {
         Ok(match action {
-            UserAction::Escape => AppState::HomePage(HomePage::new()),
+            UserActionEvent::Escape => AppState::HomePage(HomePage::new()),
             _ => AppState::TablePage(self),
         })
     }
