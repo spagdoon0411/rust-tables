@@ -145,7 +145,7 @@ impl RenderableAppPage for HomePage {
         })
     }
 
-    fn derive_next_app_state_for_event(mut self, app_event: &AppEvent) -> anyhow::Result<AppState> {
+    fn derive_next_app_state(mut self, app_event: &AppEvent) -> anyhow::Result<AppState> {
         match app_event {
             AppEvent::UserAction(action) => match action {
                 UserActionEvent::Scroll(ScrollDirection::Up | ScrollDirection::Down) => {
@@ -158,7 +158,8 @@ impl RenderableAppPage for HomePage {
                 UserActionEvent::Escape => Ok(AppState::Exited),
                 _ => Ok(AppState::HomePage(self)),
             },
-            _ => todo!("async messages are not supported yet"),
+            AppEvent::AsyncMessage(_) => Ok(AppState::HomePage(self)),
+            AppEvent::Tick => Ok(AppState::HomePage(self)),
         }
     }
 }

@@ -83,13 +83,14 @@ impl RenderableAppPage for TablePage {
         })
     }
 
-    fn derive_next_app_state_for_event(self, app_event: &AppEvent) -> anyhow::Result<AppState> {
+    fn derive_next_app_state(self, app_event: &AppEvent) -> anyhow::Result<AppState> {
         match app_event {
             AppEvent::UserAction(action) => match action {
                 UserActionEvent::Escape => Ok(AppState::HomePage(HomePage::new())),
                 _ => Ok(AppState::TablePage(self)),
             },
-            _ => todo!("async messages are not supported yet"),
+            AppEvent::AsyncMessage(_) => Ok(AppState::TablePage(self)),
+            AppEvent::Tick => Ok(AppState::TablePage(self)),
         }
     }
 }

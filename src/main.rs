@@ -3,7 +3,10 @@ mod tables;
 mod transactions;
 mod ui;
 
-use crate::ui::{AppState, HomePage, RenderableAppPage};
+use crate::{
+    transactions::AppOperationResult,
+    ui::{AppState, HomePage, RenderableAppPage},
+};
 use crossterm::{
     event::{
         EventStream, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
@@ -14,6 +17,7 @@ use crossterm::{
 };
 use sqlx::{Pool, Sqlite};
 use std::{io::stdout, process::ExitCode};
+use tokio::sync::mpsc;
 use tokio::time::{self, Duration};
 use ui::AppEvent;
 
@@ -49,6 +53,7 @@ async fn app(pool: &Pool<Sqlite>) -> anyhow::Result<()> {
 
     let mut app_state = AppState::HomePage(HomePage::new());
     let mut tick = time::interval(Duration::from_millis(100));
+    let (tx, mut rx) = mpsc::channel::<AppOperationResult>(100);
 
     loop {
         // Terminal states are never projected to the terminal and never
@@ -60,10 +65,11 @@ async fn app(pool: &Pool<Sqlite>) -> anyhow::Result<()> {
         // Project app state onto terminal
         terminal.draw(|frame| app_state.draw(frame))?;
 
-        // Poll for actions
+        // Race receipts of AppEvents
         let app_event = tokio::select! {
-            _ = tick.tick() => AppEvent::Tick,
-            action = app_state.collect_action(&mut event_stream) => AppEvent::UserAction(action?),
+            /* UserAction */ action = app_state.collect_action(&mut event_stream) => AppEvent::UserAction(action?),
+            /* AsyncMessage */ Some(msg) = rx.recv() => AppEvent::AsyncMessage(msg),
+            /* Tick */ _ = tick.tick() => AppEvent::Tick,
         };
 
         // Transition app state, clearing the terminal when necessary
