@@ -75,7 +75,11 @@ async fn execute_request(pool: Pool<Sqlite>, request: AppOperationRequest) -> Ap
 
 /// Spawns `request`'s execution against `pool` and sends its result over
 /// `tx` once complete, without blocking the caller.
-fn launch(tx: mpsc::Sender<AppOperationResult>, pool: Pool<Sqlite>, request: AppOperationRequest) {
+pub fn launch(
+    tx: mpsc::Sender<AppOperationResult>,
+    pool: Pool<Sqlite>,
+    request: AppOperationRequest,
+) {
     tokio::spawn(async move {
         // TODO: may be incomplete on a UI shutdown (app exits; Tokio tasks are killed)
         let result = execute_request(pool, request).await;

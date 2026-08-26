@@ -9,6 +9,7 @@ use ratatui::{
 };
 
 use crate::tables::TableId;
+use crate::transactions::AppOperationRequest;
 use crate::ui::{AppEvent, AppState, RenderableAppPage, ScrollDirection, UserActionEvent};
 
 use super::home_page::HomePage;
@@ -83,14 +84,17 @@ impl RenderableAppPage for TablePage {
         })
     }
 
-    fn derive_next_app_state(self, app_event: &AppEvent) -> anyhow::Result<AppState> {
+    fn derive_next_app_state(
+        self,
+        app_event: &AppEvent,
+    ) -> anyhow::Result<(AppState, Option<AppOperationRequest>)> {
         match app_event {
             AppEvent::UserAction(action) => match action {
-                UserActionEvent::Escape => Ok(AppState::HomePage(HomePage::new())),
-                _ => Ok(AppState::TablePage(self)),
+                UserActionEvent::Escape => Ok((AppState::HomePage(HomePage::new()), None)),
+                _ => Ok((AppState::TablePage(self), None)),
             },
-            AppEvent::AsyncMessage(_) => Ok(AppState::TablePage(self)),
-            AppEvent::Tick => Ok(AppState::TablePage(self)),
+            AppEvent::AsyncMessage(_) => Ok((AppState::TablePage(self), None)),
+            AppEvent::Tick => Ok((AppState::TablePage(self), None)),
         }
     }
 }

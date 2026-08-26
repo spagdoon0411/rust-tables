@@ -4,7 +4,7 @@ mod transactions;
 mod ui;
 
 use crate::{
-    transactions::AppOperationResult,
+    transactions::{AppOperationResult, launch},
     ui::{AppState, HomePage, RenderableAppPage},
 };
 use crossterm::{
@@ -73,7 +73,12 @@ async fn app(pool: Pool<Sqlite>) -> anyhow::Result<()> {
         };
 
         // Transition app state, clearing the terminal when necessary
-        app_state = app_state.transition_app_state(&app_event, &mut terminal)?;
+        let request;
+        (app_state, request) = app_state.transition_app_state(&app_event, &mut terminal)?;
+
+        if let Some(request) = request {
+            launch(tx.clone(), pool.clone(), request);
+        }
     }
 
     terminal_specific_cleanup(keyboard_enhancement_supported)?;

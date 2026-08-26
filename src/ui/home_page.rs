@@ -9,6 +9,7 @@ use ratatui::{
 };
 
 use crate::tables::{TableId, TableSchema};
+use crate::transactions::AppOperationRequest;
 use crate::ui::{AppEvent, AppState, RenderableAppPage, ScrollDirection, UserActionEvent};
 
 use super::table_page::TablePage;
@@ -145,21 +146,25 @@ impl RenderableAppPage for HomePage {
         })
     }
 
-    fn derive_next_app_state(mut self, app_event: &AppEvent) -> anyhow::Result<AppState> {
+    fn derive_next_app_state(
+        mut self,
+        app_event: &AppEvent,
+    ) -> anyhow::Result<(AppState, Option<AppOperationRequest>)> {
         match app_event {
             AppEvent::UserAction(action) => match action {
                 UserActionEvent::Scroll(ScrollDirection::Up | ScrollDirection::Down) => {
                     self.list_state.select(Some(self.selected));
-                    Ok(AppState::HomePage(self))
+                    Ok((AppState::HomePage(self), None))
                 }
-                UserActionEvent::ViewTable { table } => {
-                    Ok(AppState::TablePage(TablePage::new(table.id.clone())))
-                }
-                UserActionEvent::Escape => Ok(AppState::Exited),
-                _ => Ok(AppState::HomePage(self)),
+                UserActionEvent::ViewTable { table } => Ok((
+                    AppState::TablePage(TablePage::new(table.id.clone())),
+                    None,
+                )),
+                UserActionEvent::Escape => Ok((AppState::Exited, None)),
+                _ => Ok((AppState::HomePage(self), None)),
             },
-            AppEvent::AsyncMessage(_) => Ok(AppState::HomePage(self)),
-            AppEvent::Tick => Ok(AppState::HomePage(self)),
+            AppEvent::AsyncMessage(_) => Ok((AppState::HomePage(self), None)),
+            AppEvent::Tick => Ok((AppState::HomePage(self), None)),
         }
     }
 }

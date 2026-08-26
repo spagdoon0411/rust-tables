@@ -12,7 +12,7 @@ use ratatui::{DefaultTerminal, Frame};
 
 use crate::{
     tables::{ColumnType, TableSchema},
-    transactions::AppOperationResult,
+    transactions::{AppOperationRequest, AppOperationResult},
 };
 
 pub enum ScrollDirection {
@@ -65,8 +65,12 @@ pub trait RenderableAppPage: Into<AppState> + Sized {
 
     /// Consumes the current page and produces the next `AppState` in response to an
     /// event, either with the same page type with possibly mutated fields or of a
-    /// different page type.
-    fn derive_next_app_state(self, app_event: &AppEvent) -> anyhow::Result<AppState>;
+    /// different page type, along with an optional async operation request to
+    /// dispatch as a result of the transition.
+    fn derive_next_app_state(
+        self,
+        app_event: &AppEvent,
+    ) -> anyhow::Result<(AppState, Option<AppOperationRequest>)>;
 }
 
 pub enum AppState {
@@ -95,7 +99,10 @@ impl RenderableAppPage for AppState {
         }
     }
 
-    fn derive_next_app_state(self, app_event: &AppEvent) -> anyhow::Result<AppState> {
+    fn derive_next_app_state(
+        self,
+        app_event: &AppEvent,
+    ) -> anyhow::Result<(AppState, Option<AppOperationRequest>)> {
         match self {
             AppState::HomePage(page) => page.derive_next_app_state(app_event),
             AppState::TablePage(page) => page.derive_next_app_state(app_event),
@@ -109,14 +116,14 @@ impl AppState {
         self,
         app_event: &AppEvent,
         terminal: &mut DefaultTerminal,
-    ) -> anyhow::Result<AppState> {
+    ) -> anyhow::Result<(AppState, Option<AppOperationRequest>)> {
         let current_kind = discriminant(&self);
 
-        let next_state = self.derive_next_app_state(app_event)?;
+        let (next_state, request) = self.derive_next_app_state(app_event)?;
         let next_kind = discriminant(&next_state);
         if next_kind != current_kind {
             terminal.clear().context("while clearing terminal")?;
         }
-        Ok(next_state)
+        Ok((next_state, request))
     }
 }
