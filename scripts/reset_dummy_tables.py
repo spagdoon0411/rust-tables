@@ -12,7 +12,7 @@ from pathlib import Path
 
 DB_PATH = Path(__file__).resolve().parent.parent / "user_data" / "fitness_tracker.db"
 
-DUMMY_TABLE_NAMES = ["Workouts", "Meals", "Sleep", "Body Weight"]
+DUMMY_TABLE_NAMES = [f"Table{i}" for i in range(1, 21)]
 
 
 def quote_ident(ident: str) -> str:
@@ -50,7 +50,7 @@ def populate_dummy_tables(conn: sqlite3.Connection, names: list[str]) -> None:
         physical_name = physical_table_name(name, table_id)
         conn.execute(
             f"CREATE TABLE {quote_ident(physical_name)} "
-            f'(id TEXT PRIMARY KEY, {quote_ident("Name")} TEXT)'
+            f"(id TEXT PRIMARY KEY, {quote_ident('Name')} TEXT)"
         )
 
 

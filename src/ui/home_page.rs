@@ -5,14 +5,30 @@ use ratatui::{
     Frame,
     crossterm::event::{Event, KeyCode, KeyEventKind},
     layout::{Alignment, Constraint, Flex, Layout, Rect},
-    widgets::{Block, List, ListState, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
+    widgets::{
+        Block, List, ListState, Padding, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
+    },
 };
 
-use crate::transactions::{AppOperationRequest, AppOperationResult};
+use crate::transactions::{AppOperationRequest, AppOperationResult, DeleteTableInput};
 use crate::ui::{AppState, RenderableAppPage, ScrollDirection, UserActionEvent};
 use crate::{tables::TableSchema, transactions::RetrieveTablesOutput};
 
 use super::table_page::TablePage;
+
+// Displayed to the right of the table list, left-aligned with it: each
+// available key alongside a brief description of what it does.
+const KEY_HINTS: [(&str, &str); 3] = [("j/k ↓/↑", "Scroll"), ("q/esc", "Return"), ("d", "Delete")];
+
+// The table list's row count is clamped to this range, so the box stays a
+// roughly consistent size regardless of how many tables there are.
+const MIN_LIST_HEIGHT: u16 = 16;
+const MAX_LIST_HEIGHT: u16 = 16;
+
+// The table list's column count is clamped to this range, so the box stays a
+// roughly consistent size regardless of table name lengths.
+const MIN_LIST_WIDTH: u16 = 64;
+const MAX_LIST_WIDTH: u16 = 128;
 
 enum TableList {
     NotRequested,
@@ -35,25 +51,63 @@ impl HomePage {
         }
     }
 
-    // Determine the centered area for the table list's enclosing border,
-    // capping the inner content height at half the screen.
-    fn layout_list_area(frame_area: Rect, names: &[&str]) -> Rect {
-        let max_list_height = frame_area.height.saturating_sub(2) / 2;
+    // Formats each key hint as "<key>  <description>", padding keys to a
+    // common width so the descriptions line up.
+    fn key_hint_lines() -> Vec<String> {
+        let key_width = KEY_HINTS
+            .iter()
+            .map(|(key, _)| key.len())
+            .max()
+            .unwrap_or(0);
+
+        KEY_HINTS
+            .iter()
+            .map(|(key, description)| format!("{key:key_width$}  {description}"))
+            .collect()
+    }
+
+    // Determine the centered areas for the table list's enclosing border and
+    // its key hints, the latter placed to the right and left-aligned with
+    // the list (but one row lower). The list's row and column counts are
+    // clamped to [MIN_LIST_HEIGHT, MAX_LIST_HEIGHT] and
+    // [MIN_LIST_WIDTH, MAX_LIST_WIDTH] respectively, so the box stays a
+    // roughly consistent size regardless of the table list's contents.
+    fn layout_list_area(frame_area: Rect, names: &[&str]) -> (Rect, Rect) {
         let content_height = names.len() as u16;
-        let list_height = content_height.min(max_list_height).max(1);
-        let needs_scrollbar = content_height > max_list_height;
+        let list_height = content_height.clamp(MIN_LIST_HEIGHT, MAX_LIST_HEIGHT);
+        let needs_scrollbar = content_height > list_height;
 
         let text_width = names.iter().map(|name| name.len()).max().unwrap_or(0) as u16 + 4;
-        let width = (text_width + u16::from(needs_scrollbar) + 2).min(frame_area.width);
+        let list_width =
+            (text_width + u16::from(needs_scrollbar) + 2).clamp(MIN_LIST_WIDTH, MAX_LIST_WIDTH);
+
+        let hint_lines = Self::key_hint_lines();
+        let hint_gap = 2u16;
+        let hint_width = hint_lines.iter().map(|line| line.len()).max().unwrap_or(0) as u16;
+
+        let total_width = list_width + hint_gap + hint_width;
 
         let [vertical_area] = Layout::vertical([Constraint::Length(list_height + 2)])
             .flex(Flex::Center)
             .areas(frame_area);
-        let [centered_area] = Layout::horizontal([Constraint::Length(width)])
+        let [centered_area] = Layout::horizontal([Constraint::Length(total_width)])
             .flex(Flex::Center)
             .areas(vertical_area);
 
-        centered_area
+        let [list_area, _gap_area, hints_area] = Layout::horizontal([
+            Constraint::Length(list_width),
+            Constraint::Length(hint_gap),
+            Constraint::Length(hint_width),
+        ])
+        .areas(centered_area);
+
+        let hints_area = Rect {
+            y: hints_area.y + 1,
+            height: hints_area.height.saturating_sub(1),
+            ..hints_area
+        };
+
+        (list_area, hints_area)
     }
 
     // Render the table list inside a bordered block, splitting off a
@@ -62,7 +116,7 @@ impl HomePage {
         let content_height = names.len() as u16;
         let list = List::new(names).highlight_symbol("> ");
 
-        let block = Block::bordered();
+        let block = Block::bordered().padding(Padding::horizontal(1));
         let inner_area = block.inner(area);
         frame.render_widget(block, area);
 
@@ -95,6 +149,12 @@ impl HomePage {
             Paragraph::new("Loading tables...").alignment(Alignment::Center),
             area,
         );
+    }
+
+    // Renders the key hints, left-aligned, top-aligned with the list.
+    fn draw_key_hints(frame: &mut Frame, area: Rect) {
+        let text = Self::key_hint_lines().join("\n");
+        frame.render_widget(Paragraph::new(text).alignment(Alignment::Left), area);
     }
 }
 
@@ -149,8 +209,9 @@ impl RenderableAppPage for HomePage {
                 tables, list_state, ..
             } => {
                 let names: Vec<&str> = tables.iter().map(|table| table.name.as_str()).collect();
-                let list_area = Self::layout_list_area(frame.area(), &names);
+                let (list_area, hints_area) = Self::layout_list_area(frame.area(), &names);
                 Self::draw_list(frame, list_area, names, list_state);
+                Self::draw_key_hints(frame, hints_area);
             }
         }
     }
