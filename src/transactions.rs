@@ -4,27 +4,43 @@ use sqlx::{Pool, Sqlite};
 
 use crate::{
     repository::{self, TableSchemaRow},
-    tables::TableId,
+    tables::{TableId, TableSchema},
 };
+
+fn table_schema_from_row(row: TableSchemaRow) -> TableSchema {
+    TableSchema {
+        id: row.table_id,
+        name: row.name,
+        columns: vec![],
+    }
+}
 
 async fn create_table(
     pool: Pool<Sqlite>,
     input: CreateTableInput,
 ) -> anyhow::Result<CreateTableOutput> {
     let table = repository::create_table(pool, input.name).await?;
-    Ok(CreateTableOutput { table })
+    Ok(CreateTableOutput {
+        table: table_schema_from_row(table),
+    })
 }
 
 async fn delete_table(
     pool: Pool<Sqlite>,
     input: DeleteTableInput,
 ) -> anyhow::Result<DeleteTableOutput> {
-    repository::delete_table(pool, &input.table_id).await?;
-    Ok(DeleteTableOutput {})
+    let table = repository::delete_table(pool, &input.table_id).await?;
+    Ok(DeleteTableOutput {
+        table: table_schema_from_row(table),
+    })
 }
 
 async fn retrieve_tables(pool: Pool<Sqlite>) -> anyhow::Result<RetrieveTablesOutput> {
-    let tables = repository::list_tables(pool).await?;
+    let tables = repository::list_tables(pool)
+        .await?
+        .into_iter()
+        .map(table_schema_from_row)
+        .collect();
     Ok(RetrieveTablesOutput { tables })
 }
 
@@ -32,16 +48,18 @@ pub struct CreateTableInput {
     name: String,
 }
 pub struct CreateTableOutput {
-    table: TableSchemaRow,
+    table: TableSchema,
 }
 
 pub struct DeleteTableInput {
     table_id: TableId,
 }
-pub struct DeleteTableOutput {}
+pub struct DeleteTableOutput {
+    table: TableSchema,
+}
 
 pub struct RetrieveTablesOutput {
-    pub tables: Vec<TableSchemaRow>,
+    pub tables: Vec<TableSchema>,
 }
 
 pub enum AppOperationRequest {

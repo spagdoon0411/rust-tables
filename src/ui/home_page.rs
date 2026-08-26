@@ -130,16 +130,6 @@ impl HomePage {
         match msg {
             AppOperationResult::RetrieveTables(result) => match result {
                 Ok(RetrieveTablesOutput { tables }) => {
-                    // TODO: move this conversion into the transaction layer;
-                    // the UI layer should not see repository-layer types.
-                    let tables: Vec<TableSchema> = tables
-                        .iter()
-                        .map(|row| TableSchema {
-                            id: row.table_id.clone(),
-                            name: row.name.clone(),
-                            columns: vec![],
-                        })
-                        .collect();
                     let list_state = ListState::default().with_selected(if tables.is_empty() {
                         None
                     } else {
@@ -147,7 +137,7 @@ impl HomePage {
                     });
 
                     self.table_list = TableList::Loaded {
-                        tables,
+                        tables: tables.clone(),
                         list_state,
                         selected: 0,
                     };

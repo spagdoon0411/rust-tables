@@ -127,8 +127,9 @@ pub async fn create_table(
 
 /// Deletes the table schema for `id`. Cascades to delete its column schemas
 /// via the `ON DELETE CASCADE` foreign key, and drops the physical SQLite
-/// table backing it. Returns an error if no table schema exists for `id`.
-pub async fn delete_table(pool: Pool<Sqlite>, id: &TableId) -> anyhow::Result<()> {
+/// table backing it. Returns the deleted table schema row, or an error if no
+/// table schema exists for `id`.
+pub async fn delete_table(pool: Pool<Sqlite>, id: &TableId) -> anyhow::Result<TableSchemaRow> {
     let mut tx = pool.begin().await?;
 
     let name: Option<String> = sqlx::query_scalar("SELECT name FROM table_schemas WHERE id = ?")
@@ -161,7 +162,7 @@ pub async fn delete_table(pool: Pool<Sqlite>, id: &TableId) -> anyhow::Result<()
 
     tx.commit().await?;
 
-    Ok(())
+    Ok(table)
 }
 
 /// Lists all table schemas, ordered by nothing in particular.
@@ -431,7 +432,9 @@ mod tests {
                 .unwrap();
         assert_eq!(physical_table_count, 1);
 
-        delete_table(pool.clone(), &table.table_id).await.unwrap();
+        let deleted = delete_table(pool.clone(), &table.table_id).await.unwrap();
+        assert_eq!(deleted.table_id, table.table_id);
+        assert_eq!(deleted.name, table.name);
 
         let (physical_table_count,): (i64,) =
             sqlx::query_as("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?")
