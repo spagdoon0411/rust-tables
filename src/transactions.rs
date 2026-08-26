@@ -8,7 +8,7 @@ use crate::{
 };
 
 async fn create_table(
-    pool: &Pool<Sqlite>,
+    pool: Pool<Sqlite>,
     input: CreateTableInput,
 ) -> anyhow::Result<CreateTableOutput> {
     let table = repository::create_table(pool, input.name).await?;
@@ -16,14 +16,14 @@ async fn create_table(
 }
 
 async fn delete_table(
-    pool: &Pool<Sqlite>,
+    pool: Pool<Sqlite>,
     input: DeleteTableInput,
 ) -> anyhow::Result<DeleteTableOutput> {
     repository::delete_table(pool, &input.table_id).await?;
     Ok(DeleteTableOutput {})
 }
 
-async fn retrieve_tables(pool: &Pool<Sqlite>) -> anyhow::Result<RetrieveTablesOutput> {
+async fn retrieve_tables(pool: Pool<Sqlite>) -> anyhow::Result<RetrieveTablesOutput> {
     let _ = pool;
     // Repository has no listing query yet.
     Ok(RetrieveTablesOutput { tables: vec![] })
@@ -59,7 +59,7 @@ pub enum AppOperationResult {
 
 /// Dispatches `request` to its operation-specific function, passing the
 /// whole input struct rather than unpacked fields.
-async fn execute_request(pool: &Pool<Sqlite>, request: AppOperationRequest) -> AppOperationResult {
+async fn execute_request(pool: Pool<Sqlite>, request: AppOperationRequest) -> AppOperationResult {
     match request {
         AppOperationRequest::CreateTable(input) => {
             AppOperationResult::CreateTable(create_table(pool, input).await)
@@ -78,7 +78,7 @@ async fn execute_request(pool: &Pool<Sqlite>, request: AppOperationRequest) -> A
 fn launch(tx: mpsc::Sender<AppOperationResult>, pool: Pool<Sqlite>, request: AppOperationRequest) {
     tokio::spawn(async move {
         // TODO: may be incomplete on a UI shutdown (app exits; Tokio tasks are killed)
-        let result = execute_request(&pool, request).await;
+        let result = execute_request(pool, request).await;
         let _ = tx.send(result).await;
     });
 }

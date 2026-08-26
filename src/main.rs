@@ -46,7 +46,7 @@ fn terminal_specific_cleanup(keyboard_enhancement_supported: bool) -> anyhow::Re
 }
 
 /// Primary application, evolving valid initial user data according to terminal input.
-async fn app(pool: &Pool<Sqlite>) -> anyhow::Result<()> {
+async fn app(pool: Pool<Sqlite>) -> anyhow::Result<()> {
     let mut event_stream = EventStream::new();
     let mut terminal = ratatui::init();
     let keyboard_enhancement_supported = terminal_specific_config()?;
@@ -84,7 +84,7 @@ async fn app(pool: &Pool<Sqlite>) -> anyhow::Result<()> {
 #[tokio::main]
 async fn main() -> ExitCode {
     // Verify initial user data state
-    let db = match repository::init_user_data().await {
+    let pool = match repository::init_user_data().await {
         Ok(pool) => pool,
         Err(err) => {
             eprintln!("error: {err}");
@@ -93,7 +93,7 @@ async fn main() -> ExitCode {
     };
 
     // Application acts on valid user data
-    match app(&db).await {
+    match app(pool).await {
         Ok(_) => ExitCode::SUCCESS,
         Err(_) => ExitCode::FAILURE,
     }

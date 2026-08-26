@@ -38,14 +38,14 @@ fn quote_ident(ident: &str) -> String {
 /// Creates the `table_schemas` and `column_schemas` tables if they don't
 /// already exist. `column_schemas` rows reference their owning table with
 /// `ON DELETE CASCADE`, so deleting a table schema also deletes its columns.
-async fn create_schema_tables(pool: &Pool<Sqlite>) -> anyhow::Result<()> {
+async fn create_schema_tables(pool: Pool<Sqlite>) -> anyhow::Result<()> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS table_schemas (
             id TEXT PRIMARY KEY NOT NULL,
             name TEXT NOT NULL
         )",
     )
-    .execute(pool)
+    .execute(&pool)
     .await?;
 
     sqlx::query(
@@ -56,7 +56,7 @@ async fn create_schema_tables(pool: &Pool<Sqlite>) -> anyhow::Result<()> {
             ty TEXT NOT NULL
         )",
     )
-    .execute(pool)
+    .execute(&pool)
     .await?;
 
     Ok(())
@@ -66,7 +66,7 @@ async fn create_schema_tables(pool: &Pool<Sqlite>) -> anyhow::Result<()> {
 /// persists both to the database, and returns the resulting table schema
 /// row.
 pub async fn create_table(
-    pool: &Pool<Sqlite>,
+    pool: Pool<Sqlite>,
     name: impl Into<String>,
 ) -> anyhow::Result<TableSchemaRow> {
     let table_id = TableId::new();
@@ -128,7 +128,7 @@ pub async fn create_table(
 /// Deletes the table schema for `id`. Cascades to delete its column schemas
 /// via the `ON DELETE CASCADE` foreign key, and drops the physical SQLite
 /// table backing it. Returns an error if no table schema exists for `id`.
-pub async fn delete_table(pool: &Pool<Sqlite>, id: &TableId) -> anyhow::Result<()> {
+pub async fn delete_table(pool: Pool<Sqlite>, id: &TableId) -> anyhow::Result<()> {
     let mut tx = pool.begin().await?;
 
     let name: Option<String> = sqlx::query_scalar("SELECT name FROM table_schemas WHERE id = ?")
@@ -166,7 +166,7 @@ pub async fn delete_table(pool: &Pool<Sqlite>, id: &TableId) -> anyhow::Result<(
 
 /// Creates a column associated with a table with the given name and type.
 pub async fn create_column(
-    pool: &Pool<Sqlite>,
+    pool: Pool<Sqlite>,
     table_id: &TableId,
     name: impl Into<String> + Display,
     ty: ColumnType,
@@ -279,7 +279,7 @@ async fn open_db(base_dir: &Path, allow_create: bool) -> anyhow::Result<Pool<Sql
 
     let pool = SqlitePool::connect_with(options).await?;
 
-    create_schema_tables(&pool).await?;
+    create_schema_tables(pool.clone()).await?;
 
     Ok(pool)
 }
@@ -393,7 +393,7 @@ mod tests {
         fs::create_dir(&base_dir).unwrap();
         let pool = open_db(&base_dir, true).await.unwrap();
 
-        let table = create_table(&pool, "workouts").await.unwrap();
+        let table = create_table(pool.clone(), "workouts").await.unwrap();
         assert_eq!(table.name, "workouts");
 
         let (name_column_count,): (i64,) =
@@ -415,7 +415,7 @@ mod tests {
                 .unwrap();
         assert_eq!(physical_table_count, 1);
 
-        delete_table(&pool, &table.table_id).await.unwrap();
+        delete_table(pool.clone(), &table.table_id).await.unwrap();
 
         let (physical_table_count,): (i64,) =
             sqlx::query_as("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?")
@@ -441,7 +441,7 @@ mod tests {
                 .unwrap();
         assert_eq!(column_count, 0);
 
-        let result = delete_table(&pool, &table.table_id).await;
+        let result = delete_table(pool.clone(), &table.table_id).await;
         assert!(result.is_err());
 
         pool.close().await;
@@ -456,9 +456,9 @@ mod tests {
         fs::create_dir(&base_dir).unwrap();
         let pool = open_db(&base_dir, true).await.unwrap();
 
-        let table = create_table(&pool, "workouts").await.unwrap();
+        let table = create_table(pool.clone(), "workouts").await.unwrap();
 
-        let column = create_column(&pool, &table.table_id, "reps", ColumnType::Integer)
+        let column = create_column(pool.clone(), &table.table_id, "reps", ColumnType::Integer)
             .await
             .unwrap();
 
