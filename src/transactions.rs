@@ -24,9 +24,8 @@ async fn delete_table(
 }
 
 async fn retrieve_tables(pool: Pool<Sqlite>) -> anyhow::Result<RetrieveTablesOutput> {
-    let _ = pool;
-    // Repository has no listing query yet.
-    Ok(RetrieveTablesOutput { tables: vec![] })
+    let tables = repository::list_tables(pool).await?;
+    Ok(RetrieveTablesOutput { tables })
 }
 
 pub struct CreateTableInput {
@@ -42,7 +41,7 @@ pub struct DeleteTableInput {
 pub struct DeleteTableOutput {}
 
 pub struct RetrieveTablesOutput {
-    tables: Vec<TableSchemaRow>,
+    pub tables: Vec<TableSchemaRow>,
 }
 
 pub enum AppOperationRequest {

@@ -164,6 +164,22 @@ pub async fn delete_table(pool: Pool<Sqlite>, id: &TableId) -> anyhow::Result<()
     Ok(())
 }
 
+/// Lists all table schemas, ordered by nothing in particular.
+pub async fn list_tables(pool: Pool<Sqlite>) -> anyhow::Result<Vec<TableSchemaRow>> {
+    let rows: Vec<(String, String)> = sqlx::query_as("SELECT id, name FROM table_schemas")
+        .fetch_all(&pool)
+        .await?;
+
+    rows.into_iter()
+        .map(|(id, name)| {
+            let table_id = uuid::Uuid::parse_str(&id)
+                .map(TableId)
+                .with_context(|| format!("parsing table id {id}"))?;
+            Ok(TableSchemaRow { table_id, name })
+        })
+        .collect()
+}
+
 /// Creates a column associated with a table with the given name and type.
 pub async fn create_column(
     pool: Pool<Sqlite>,
@@ -495,6 +511,32 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(column_count, 2);
+
+        pool.close().await;
+    }
+
+    // Listing tables returns every table schema present, matching their
+    // persisted ids and names.
+    #[tokio::test]
+    async fn list_tables_returns_all_table_schemas() {
+        let dir = tempfile::tempdir().unwrap();
+        let base_dir = dir.path().join("user_data");
+        fs::create_dir(&base_dir).unwrap();
+        let pool = open_db(&base_dir, true).await.unwrap();
+
+        assert!(list_tables(pool.clone()).await.unwrap().is_empty());
+
+        let workouts = create_table(pool.clone(), "workouts").await.unwrap();
+        let meals = create_table(pool.clone(), "meals").await.unwrap();
+
+        let mut tables = list_tables(pool.clone()).await.unwrap();
+        tables.sort_by(|a, b| a.name.cmp(&b.name));
+
+        assert_eq!(tables.len(), 2);
+        assert_eq!(tables[0].table_id, meals.table_id);
+        assert_eq!(tables[0].name, "meals");
+        assert_eq!(tables[1].table_id, workouts.table_id);
+        assert_eq!(tables[1].name, "workouts");
 
         pool.close().await;
     }
