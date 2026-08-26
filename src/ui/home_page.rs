@@ -9,7 +9,7 @@ use ratatui::{
 };
 
 use crate::transactions::{AppOperationRequest, AppOperationResult};
-use crate::ui::{AppEvent, AppState, RenderableAppPage, ScrollDirection, UserActionEvent};
+use crate::ui::{AppState, RenderableAppPage, ScrollDirection, UserActionEvent};
 use crate::{tables::TableSchema, transactions::RetrieveTablesOutput};
 
 use super::table_page::TablePage;
@@ -99,80 +99,11 @@ impl HomePage {
 }
 
 impl HomePage {
-    fn respond_user_action(
-        mut self,
-        action: &UserActionEvent,
-    ) -> anyhow::Result<(AppState, Option<AppOperationRequest>)> {
-        match action {
-            UserActionEvent::Scroll(ScrollDirection::Up | ScrollDirection::Down) => {
-                if let TableList::Loaded {
-                    list_state,
-                    selected,
-                    ..
-                } = &mut self.table_list
-                {
-                    list_state.select(Some(*selected));
-                }
-                Ok((AppState::HomePage(self), None))
-            }
-            UserActionEvent::ViewTable { table } => {
-                Ok((AppState::TablePage(TablePage::new(table.id.clone())), None))
-            }
-            UserActionEvent::Escape => Ok((AppState::Exited, None)),
-            _ => Ok((AppState::HomePage(self), None)),
-        }
-    }
-
-    fn respond_async_message(
-        mut self,
-        msg: &AppOperationResult,
-    ) -> anyhow::Result<(AppState, Option<AppOperationRequest>)> {
-        match msg {
-            AppOperationResult::RetrieveTables(result) => match result {
-                Ok(RetrieveTablesOutput { tables }) => {
-                    let list_state = ListState::default().with_selected(if tables.is_empty() {
-                        None
-                    } else {
-                        Some(0)
-                    });
-
-                    self.table_list = TableList::Loaded {
-                        tables: tables.clone(),
-                        list_state,
-                        selected: 0,
-                    };
-                }
-                Err(err) => {}
-            },
-            _ => { /* Subscribe only to RetrieveTables */ }
-        }
-
-        Ok((AppState::HomePage(self), None))
-    }
-
-    fn respond_tick(mut self) -> anyhow::Result<(AppState, Option<AppOperationRequest>)> {
-        match self.table_list {
-            TableList::NotRequested => {
-                self.table_list = TableList::Loading;
-                Ok((
-                    AppState::HomePage(self),
-                    Some(AppOperationRequest::RetrieveTables),
-                ))
-            }
-            _ => Ok((AppState::HomePage(self), None)),
-        }
-    }
-
     // Handles input while no table list is available to select from; only
     // quitting is meaningful.
-    fn collect_action_loading(reading: &Event) -> UserActionEvent {
-        match reading {
-            Event::Key(key)
-                if key.kind == KeyEventKind::Press
-                    && matches!(key.code, KeyCode::Char('q') | KeyCode::Esc) =>
-            {
-                UserActionEvent::Escape
-            }
+    fn collect_action_loading(key_code: KeyCode) -> UserActionEvent {
+        match key_code {
+            KeyCode::Char('q') | KeyCode::Esc => UserActionEvent::Escape,
             _ => UserActionEvent::NoAction,
         }
     }
@@ -181,27 +112,24 @@ impl HomePage {
     fn collect_action_loaded(
         tables: &[TableSchema],
         selected: &mut usize,
-        reading: &Event,
+        key_code: KeyCode,
     ) -> UserActionEvent {
-        match reading {
-            Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
-                KeyCode::Char('k') | KeyCode::Up => {
-                    *selected = selected.checked_sub(1).unwrap_or(*selected);
-                    UserActionEvent::Scroll(ScrollDirection::Up)
-                }
-                KeyCode::Char('j') | KeyCode::Down => {
-                    *selected = (*selected + 1).min(tables.len().saturating_sub(1));
-                    UserActionEvent::Scroll(ScrollDirection::Down)
-                }
-                KeyCode::Enter => match tables.get(*selected) {
-                    Some(table) => UserActionEvent::ViewTable {
-                        table: table.clone(),
-                    },
-                    None => UserActionEvent::NoAction,
+        match key_code {
+            KeyCode::Char('k') | KeyCode::Up => {
+                *selected = selected.checked_sub(1).unwrap_or(*selected);
+                UserActionEvent::Scroll(ScrollDirection::Up)
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                *selected = (*selected + 1).min(tables.len().saturating_sub(1));
+                UserActionEvent::Scroll(ScrollDirection::Down)
+            }
+            KeyCode::Enter => match tables.get(*selected) {
+                Some(table) => UserActionEvent::ViewTable {
+                    table: table.clone(),
                 },
-                KeyCode::Char('q') | KeyCode::Esc => UserActionEvent::Escape,
-                _ => UserActionEvent::NoAction,
+                None => UserActionEvent::NoAction,
             },
+            KeyCode::Char('q') | KeyCode::Esc => UserActionEvent::Escape,
             _ => UserActionEvent::NoAction,
         }
     }
@@ -231,23 +159,84 @@ impl RenderableAppPage for HomePage {
             .context("event stream ended")?
             .context("reading terminal input")?;
 
+        let Event::Key(key) = reading else {
+            return Ok(UserActionEvent::NoAction);
+        };
+        if key.kind != KeyEventKind::Press {
+            return Ok(UserActionEvent::NoAction);
+        }
+
         Ok(match &mut self.table_list {
             TableList::Loaded {
                 tables, selected, ..
-            } => Self::collect_action_loaded(tables, selected, &reading),
-            TableList::NotRequested | TableList::Loading => Self::collect_action_loading(&reading),
+            } => Self::collect_action_loaded(tables, selected, key.code),
+            TableList::NotRequested | TableList::Loading => Self::collect_action_loading(key.code),
         })
     }
 
-    fn derive_next_app_state(
-        self,
-        app_event: &AppEvent,
+    fn next_state_from_user_action(
+        mut self,
+        action: &UserActionEvent,
     ) -> anyhow::Result<(AppState, Option<AppOperationRequest>)> {
-        match app_event {
-            AppEvent::UserAction(action) => self.respond_user_action(action),
-            AppEvent::AsyncMessage(msg) => self.respond_async_message(msg),
-            AppEvent::Tick => self.respond_tick(),
+        match action {
+            UserActionEvent::Scroll(ScrollDirection::Up | ScrollDirection::Down) => {
+                if let TableList::Loaded {
+                    list_state,
+                    selected,
+                    ..
+                } = &mut self.table_list
+                {
+                    list_state.select(Some(*selected));
+                }
+                Ok((AppState::HomePage(self), None))
+            }
+            UserActionEvent::ViewTable { table } => {
+                Ok((AppState::TablePage(TablePage::new(table.id.clone())), None))
+            }
+            UserActionEvent::Escape => Ok((AppState::Exited, None)),
+            _ => Ok((AppState::HomePage(self), None)),
         }
+    }
+
+    fn next_state_from_async_message(
+        mut self,
+        msg: &AppOperationResult,
+    ) -> anyhow::Result<(AppState, Option<AppOperationRequest>)> {
+        match msg {
+            AppOperationResult::RetrieveTables(result) => match result {
+                Ok(RetrieveTablesOutput { tables }) => {
+                    let list_state = ListState::default().with_selected(if tables.is_empty() {
+                        None
+                    } else {
+                        Some(0)
+                    });
+
+                    self.table_list = TableList::Loaded {
+                        tables: tables.clone(),
+                        list_state,
+                        selected: 0,
+                    };
+                }
+                Err(err) => {
+                    todo!("Handle this error through a new UI object.")
+                }
+            },
+            _ => { /* Subscribe only to RetrieveTables */ }
+        }
+
+        Ok((AppState::HomePage(self), None))
+    }
+
+    fn next_state_from_tick(mut self) -> anyhow::Result<(AppState, Option<AppOperationRequest>)> {
+        let TableList::NotRequested = self.table_list else {
+            return Ok((AppState::HomePage(self), None));
+        };
+
+        self.table_list = TableList::Loading;
+        Ok((
+            AppState::HomePage(self),
+            Some(AppOperationRequest::RetrieveTables),
+        ))
     }
 }
 

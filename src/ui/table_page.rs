@@ -9,8 +9,8 @@ use ratatui::{
 };
 
 use crate::tables::TableId;
-use crate::transactions::AppOperationRequest;
-use crate::ui::{AppEvent, AppState, RenderableAppPage, ScrollDirection, UserActionEvent};
+use crate::transactions::{AppOperationRequest, AppOperationResult};
+use crate::ui::{AppState, RenderableAppPage, ScrollDirection, UserActionEvent};
 
 use super::home_page::HomePage;
 
@@ -60,42 +60,44 @@ impl RenderableAppPage for TablePage {
             .context("event stream ended")?
             .context("reading terminal input")?;
 
-        Ok(match reading {
-            Event::Key(key) if key.kind == KeyEventKind::Press => {
-                self.last_key = Some(key.code);
-                match key.code {
-                    KeyCode::Char('h') | KeyCode::Left => {
-                        UserActionEvent::Scroll(ScrollDirection::Left)
-                    }
-                    KeyCode::Char('j') | KeyCode::Down => {
-                        UserActionEvent::Scroll(ScrollDirection::Down)
-                    }
-                    KeyCode::Char('k') | KeyCode::Up => {
-                        UserActionEvent::Scroll(ScrollDirection::Up)
-                    }
-                    KeyCode::Char('l') | KeyCode::Right => {
-                        UserActionEvent::Scroll(ScrollDirection::Right)
-                    }
-                    KeyCode::Esc => UserActionEvent::Escape,
-                    _ => UserActionEvent::NoAction,
-                }
-            }
+        let Event::Key(key) = reading else {
+            return Ok(UserActionEvent::NoAction);
+        };
+        if key.kind != KeyEventKind::Press {
+            return Ok(UserActionEvent::NoAction);
+        }
+
+        self.last_key = Some(key.code);
+
+        Ok(match key.code {
+            KeyCode::Char('h') | KeyCode::Left => UserActionEvent::Scroll(ScrollDirection::Left),
+            KeyCode::Char('j') | KeyCode::Down => UserActionEvent::Scroll(ScrollDirection::Down),
+            KeyCode::Char('k') | KeyCode::Up => UserActionEvent::Scroll(ScrollDirection::Up),
+            KeyCode::Char('l') | KeyCode::Right => UserActionEvent::Scroll(ScrollDirection::Right),
+            KeyCode::Esc => UserActionEvent::Escape,
             _ => UserActionEvent::NoAction,
         })
     }
 
-    fn derive_next_app_state(
+    fn next_state_from_user_action(
         self,
-        app_event: &AppEvent,
+        action: &UserActionEvent,
     ) -> anyhow::Result<(AppState, Option<AppOperationRequest>)> {
-        match app_event {
-            AppEvent::UserAction(action) => match action {
-                UserActionEvent::Escape => Ok((AppState::HomePage(HomePage::new()), None)),
-                _ => Ok((AppState::TablePage(self), None)),
-            },
-            AppEvent::AsyncMessage(_) => Ok((AppState::TablePage(self), None)),
-            AppEvent::Tick => Ok((AppState::TablePage(self), None)),
+        match action {
+            UserActionEvent::Escape => Ok((AppState::HomePage(HomePage::new()), None)),
+            _ => Ok((AppState::TablePage(self), None)),
         }
+    }
+
+    fn next_state_from_async_message(
+        self,
+        _msg: &AppOperationResult,
+    ) -> anyhow::Result<(AppState, Option<AppOperationRequest>)> {
+        Ok((AppState::TablePage(self), None))
+    }
+
+    fn next_state_from_tick(self) -> anyhow::Result<(AppState, Option<AppOperationRequest>)> {
+        Ok((AppState::TablePage(self), None))
     }
 }
 
