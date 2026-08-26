@@ -129,6 +129,12 @@ impl HomePage {
                 },
                 None => UserActionEvent::NoAction,
             },
+            KeyCode::Char('d') => match tables.get(*selected) {
+                Some(table) => UserActionEvent::DeleteTable {
+                    table: table.clone(),
+                },
+                None => UserActionEvent::NoAction,
+            },
             KeyCode::Char('q') | KeyCode::Esc => UserActionEvent::Escape,
             _ => UserActionEvent::NoAction,
         }
@@ -193,6 +199,12 @@ impl RenderableAppPage for HomePage {
             UserActionEvent::ViewTable { table } => {
                 Ok((AppState::TablePage(TablePage::new(table.id.clone())), None))
             }
+            UserActionEvent::DeleteTable { table } => Ok((
+                AppState::HomePage(self),
+                Some(AppOperationRequest::DeleteTable(DeleteTableInput {
+                    table_id: table.id.clone(),
+                })),
+            )),
             UserActionEvent::Escape => Ok((AppState::Exited, None)),
             _ => Ok((AppState::HomePage(self), None)),
         }
@@ -221,7 +233,16 @@ impl RenderableAppPage for HomePage {
                     todo!("Handle this error through a new UI object.")
                 }
             },
-            _ => { /* Subscribe only to RetrieveTables */ }
+            AppOperationResult::DeleteTable(result) => match result {
+                Ok(_) => {
+                    // Re-fetch the table list on the next tick.
+                    self.table_list = TableList::NotRequested;
+                }
+                Err(err) => {
+                    todo!("Handle this error through a new UI object.")
+                }
+            },
+            _ => { /* Subscribe only to RetrieveTables and DeleteTable */ }
         }
 
         Ok((AppState::HomePage(self), None))

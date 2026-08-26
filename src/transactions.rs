@@ -52,7 +52,7 @@ pub struct CreateTableOutput {
 }
 
 pub struct DeleteTableInput {
-    table_id: TableId,
+    pub table_id: TableId,
 }
 pub struct DeleteTableOutput {
     table: TableSchema,
