@@ -1,9 +1,11 @@
 mod home_page;
+mod notifications;
 mod table_page;
 
 pub use home_page::HomePage;
 pub use table_page::TablePage;
 
+use notifications::NotifLevel;
 use std::mem::discriminant;
 
 use anyhow::Context;
