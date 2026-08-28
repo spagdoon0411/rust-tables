@@ -45,7 +45,7 @@ async fn retrieve_tables(pool: Pool<Sqlite>) -> anyhow::Result<RetrieveTablesOut
 }
 
 pub struct CreateTableInput {
-    name: String,
+    pub name: String,
 }
 pub struct CreateTableOutput {
     table: TableSchema,

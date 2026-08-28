@@ -10,7 +10,9 @@ use ratatui::{
     },
 };
 
-use crate::transactions::{AppOperationRequest, AppOperationResult, DeleteTableInput};
+use crate::transactions::{
+    AppOperationRequest, AppOperationResult, CreateTableInput, DeleteTableInput,
+};
 use crate::ui::{AppState, RenderableAppPage, ScrollDirection, UserActionEvent};
 use crate::{tables::TableSchema, transactions::RetrieveTablesOutput};
 
@@ -18,7 +20,12 @@ use super::table_page::TablePage;
 
 // Displayed to the right of the table list, left-aligned with it: each
 // available key alongside a brief description of what it does.
-const KEY_HINTS: [(&str, &str); 3] = [("j/k ↓/↑", "Scroll"), ("q/esc", "Return"), ("d", "Delete")];
+const KEY_HINTS: [(&str, &str); 4] = [
+    ("j/k ↓/↑", "Scroll"),
+    ("q/esc", "Return"),
+    ("d", "Delete"),
+    ("c", "New table"),
+];
 
 // The table list's row count is clamped to this range, so the box stays a
 // roughly consistent size regardless of how many tables there are.
@@ -40,14 +47,21 @@ enum TableList {
     },
 }
 
+enum CreationMenu {
+    ViewingList,
+    CreatingTable(String),
+}
+
 pub struct HomePage {
     table_list: TableList,
+    creating: CreationMenu,
 }
 
 impl HomePage {
     pub fn new() -> Self {
         Self {
             table_list: TableList::NotRequested,
+            creating: CreationMenu::ViewingList,
         }
     }
 
@@ -72,7 +86,14 @@ impl HomePage {
     // clamped to [MIN_LIST_HEIGHT, MAX_LIST_HEIGHT] and
     // [MIN_LIST_WIDTH, MAX_LIST_WIDTH] respectively, so the box stays a
     // roughly consistent size regardless of the table list's contents.
-    fn layout_list_area(frame_area: Rect, names: &[&str]) -> (Rect, Rect) {
+    // When `show_input` is set, an extra bordered row is reserved directly
+    // under the list (same width) for the create-table input, returned as
+    // the third element.
+    fn layout_list_area(
+        frame_area: Rect,
+        names: &[&str],
+        show_input: bool,
+    ) -> (Rect, Rect, Option<Rect>) {
         let content_height = names.len() as u16;
         let list_height = content_height.clamp(MIN_LIST_HEIGHT, MAX_LIST_HEIGHT);
         let needs_scrollbar = content_height > list_height;
@@ -86,20 +107,28 @@ impl HomePage {
         let hint_width = hint_lines.iter().map(|line| line.len()).max().unwrap_or(0) as u16;
 
         let total_width = list_width + hint_gap + hint_width;
+        let input_height = if show_input { 3u16 } else { 0u16 };
 
-        let [vertical_area] = Layout::vertical([Constraint::Length(list_height + 2)])
-            .flex(Flex::Center)
-            .areas(frame_area);
+        let [vertical_area] =
+            Layout::vertical([Constraint::Length(list_height + 2 + input_height)])
+                .flex(Flex::Center)
+                .areas(frame_area);
         let [centered_area] = Layout::horizontal([Constraint::Length(total_width)])
             .flex(Flex::Center)
             .areas(vertical_area);
+
+        let [top_area, input_area] = Layout::vertical([
+            Constraint::Length(list_height + 2),
+            Constraint::Length(input_height),
+        ])
+        .areas(centered_area);
 
         let [list_area, _gap_area, hints_area] = Layout::horizontal([
             Constraint::Length(list_width),
             Constraint::Length(hint_gap),
             Constraint::Length(hint_width),
         ])
-        .areas(centered_area);
+        .areas(top_area);
 
         let hints_area = Rect {
             y: hints_area.y + 1,
@@ -107,7 +136,12 @@ impl HomePage {
             ..hints_area
         };
 
-        (list_area, hints_area)
+        let input_area = show_input.then_some(Rect {
+            width: list_width,
+            ..input_area
+        });
+
+        (list_area, hints_area, input_area)
     }
 
     // Render the table list inside a bordered block, splitting off a
@@ -156,6 +190,15 @@ impl HomePage {
         let text = Self::key_hint_lines().join("\n");
         frame.render_widget(Paragraph::new(text).alignment(Alignment::Left), area);
     }
+
+    // Renders the new-table name input, directly under the list.
+    fn draw_create_input(frame: &mut Frame, area: Rect, buffer: &str) {
+        let block = Block::bordered()
+            .title(" New table name ")
+            .padding(Padding::new(1, 0, 0, 0));
+        let text = format!("{buffer}\u{2588}");
+        frame.render_widget(Paragraph::new(text).block(block), area);
+    }
 }
 
 impl HomePage {
@@ -199,6 +242,36 @@ impl HomePage {
             _ => UserActionEvent::NoAction,
         }
     }
+
+    // Handles input while the create-table input is focused: characters are
+    // appended to the buffer, Backspace removes the last character, Enter
+    // confirms, and Esc cancels back to the table list.
+    fn collect_action_creating(creating: &mut CreationMenu, key_code: KeyCode) -> UserActionEvent {
+        let CreationMenu::CreatingTable(buffer) = creating else {
+            return UserActionEvent::NoAction;
+        };
+
+        match key_code {
+            KeyCode::Enter => {
+                let name = std::mem::take(buffer);
+                *creating = CreationMenu::ViewingList;
+                UserActionEvent::CreateTable { name }
+            }
+            KeyCode::Esc => {
+                *creating = CreationMenu::ViewingList;
+                UserActionEvent::NoAction
+            }
+            KeyCode::Backspace => {
+                buffer.pop();
+                UserActionEvent::NoAction
+            }
+            KeyCode::Char(c) => {
+                buffer.push(c);
+                UserActionEvent::NoAction
+            }
+            _ => UserActionEvent::NoAction,
+        }
+    }
 }
 
 impl RenderableAppPage for HomePage {
@@ -209,9 +282,16 @@ impl RenderableAppPage for HomePage {
                 tables, list_state, ..
             } => {
                 let names: Vec<&str> = tables.iter().map(|table| table.name.as_str()).collect();
-                let (list_area, hints_area) = Self::layout_list_area(frame.area(), &names);
+                let show_input = matches!(self.creating, CreationMenu::CreatingTable(_));
+                let (list_area, hints_area, input_area) =
+                    Self::layout_list_area(frame.area(), &names, show_input);
                 Self::draw_list(frame, list_area, names, list_state);
                 Self::draw_key_hints(frame, hints_area);
+                if let (Some(area), CreationMenu::CreatingTable(buffer)) =
+                    (input_area, &self.creating)
+                {
+                    Self::draw_create_input(frame, area, buffer);
+                }
             }
         }
     }
@@ -233,10 +313,21 @@ impl RenderableAppPage for HomePage {
             return Ok(UserActionEvent::NoAction);
         }
 
+        if matches!(self.creating, CreationMenu::CreatingTable(_)) {
+            return Ok(Self::collect_action_creating(&mut self.creating, key.code));
+        }
+
         Ok(match &mut self.table_list {
             TableList::Loaded {
                 tables, selected, ..
-            } => Self::collect_action_loaded(tables, selected, key.code),
+            } => {
+                if key.code == KeyCode::Char('c') {
+                    self.creating = CreationMenu::CreatingTable(String::new());
+                    UserActionEvent::NoAction
+                } else {
+                    Self::collect_action_loaded(tables, selected, key.code)
+                }
+            }
             TableList::NotRequested | TableList::Loading => Self::collect_action_loading(key.code),
         })
     }
@@ -264,6 +355,12 @@ impl RenderableAppPage for HomePage {
                 AppState::HomePage(self),
                 Some(AppOperationRequest::DeleteTable(DeleteTableInput {
                     table_id: table.id.clone(),
+                })),
+            )),
+            UserActionEvent::CreateTable { name } => Ok((
+                AppState::HomePage(self),
+                Some(AppOperationRequest::CreateTable(CreateTableInput {
+                    name: name.clone(),
                 })),
             )),
             UserActionEvent::Escape => Ok((AppState::Exited, None)),
@@ -303,7 +400,15 @@ impl RenderableAppPage for HomePage {
                     todo!("Handle this error through a new UI object.")
                 }
             },
-            _ => { /* Subscribe only to RetrieveTables and DeleteTable */ }
+            AppOperationResult::CreateTable(result) => match result {
+                Ok(_) => {
+                    // Re-fetch the table list on the next tick.
+                    self.table_list = TableList::NotRequested;
+                }
+                Err(err) => {
+                    todo!("Handle this error through a new UI object.")
+                }
+            },
         }
 
         Ok((AppState::HomePage(self), None))
