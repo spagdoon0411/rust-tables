@@ -275,6 +275,8 @@ impl HomePage {
 }
 
 impl Renderable for HomePage {
+    type Next = PageState;
+
     fn draw(&mut self, frame: &mut Frame) {
         match &mut self.table_list {
             TableList::NotRequested | TableList::Loading => Self::draw_loading(frame),

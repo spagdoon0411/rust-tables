@@ -29,6 +29,8 @@ impl TablePage {
 }
 
 impl Renderable for TablePage {
+    type Next = PageState;
+
     fn draw(&mut self, frame: &mut Frame) {
         let id_text = format!("table page {}", self.table_id.0);
         let key_text = match self.last_key {

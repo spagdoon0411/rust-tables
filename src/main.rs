@@ -5,7 +5,7 @@ mod ui;
 
 use crate::{
     transactions::{AppOperationResult, launch},
-    ui::{AppState, HomePage, PageState},
+    ui::{AppState, HomePage, PageState, Renderable},
 };
 use crossterm::{
     event::{
