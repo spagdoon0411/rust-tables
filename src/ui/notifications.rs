@@ -1,9 +1,16 @@
 use std::time::SystemTime;
 
+use anyhow::Context;
+use crossterm::event::{Event, EventStream, KeyEventKind};
+use futures_util::StreamExt;
 use ratatui::{
+    Frame,
     layout::{Alignment, Rect},
     widgets::Paragraph,
 };
+
+use crate::transactions::{AppOperationRequest, AppOperationResult};
+use crate::ui::{Renderable, UserActionEvent};
 
 pub enum NotifLevel {
     Debug,
@@ -58,6 +65,55 @@ impl NotifListState {
             content,
             level,
         })
+    }
+}
+
+impl Renderable for NotifListState {
+    // The notif list is an overlay, not a page: it never transitions into a
+    // different page type, only into a possibly-mutated version of itself.
+    type Next = NotifListState;
+
+    fn draw(&mut self, frame: &mut Frame) {
+        let (widget, area) = default_notif_list(frame.area(), self);
+        frame.render_widget(widget, area);
+    }
+
+    async fn collect_action(
+        &mut self,
+        event_stream: &mut EventStream,
+    ) -> anyhow::Result<UserActionEvent> {
+        let reading = event_stream
+            .next()
+            .await
+            .context("event stream ended")?
+            .context("reading terminal input")?;
+
+        let Event::Key(key) = reading else {
+            return Ok(UserActionEvent::NoAction);
+        };
+        if key.kind != KeyEventKind::Press {
+            return Ok(UserActionEvent::NoAction);
+        }
+
+        Ok(UserActionEvent::NoAction)
+    }
+
+    fn next_state_from_user_action(
+        self,
+        _action: &UserActionEvent,
+    ) -> anyhow::Result<(NotifListState, Option<AppOperationRequest>)> {
+        Ok((self, None))
+    }
+
+    fn next_state_from_async_message(
+        self,
+        _msg: &AppOperationResult,
+    ) -> anyhow::Result<(NotifListState, Option<AppOperationRequest>)> {
+        Ok((self, None))
+    }
+
+    fn next_state_from_tick(self) -> anyhow::Result<(NotifListState, Option<AppOperationRequest>)> {
+        Ok((self, None))
     }
 }
 
