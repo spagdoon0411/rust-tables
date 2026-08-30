@@ -10,7 +10,7 @@ use ratatui::{
 
 use crate::tables::TableId;
 use crate::transactions::{AppOperationRequest, AppOperationResult};
-use crate::ui::{AppState, Renderable, ScrollDirection, UserActionEvent};
+use crate::ui::{PageState, Renderable, ScrollDirection, UserActionEvent};
 
 use super::home_page::HomePage;
 
@@ -82,27 +82,27 @@ impl Renderable for TablePage {
     fn next_state_from_user_action(
         self,
         action: &UserActionEvent,
-    ) -> anyhow::Result<(AppState, Option<AppOperationRequest>)> {
+    ) -> anyhow::Result<(PageState, Option<AppOperationRequest>)> {
         match action {
-            UserActionEvent::Escape => Ok((AppState::HomePage(HomePage::new()), None)),
-            _ => Ok((AppState::TablePage(self), None)),
+            UserActionEvent::Escape => Ok((PageState::HomePage(HomePage::new()), None)),
+            _ => Ok((PageState::TablePage(self), None)),
         }
     }
 
     fn next_state_from_async_message(
         self,
         _msg: &AppOperationResult,
-    ) -> anyhow::Result<(AppState, Option<AppOperationRequest>)> {
-        Ok((AppState::TablePage(self), None))
+    ) -> anyhow::Result<(PageState, Option<AppOperationRequest>)> {
+        Ok((PageState::TablePage(self), None))
     }
 
-    fn next_state_from_tick(self) -> anyhow::Result<(AppState, Option<AppOperationRequest>)> {
-        Ok((AppState::TablePage(self), None))
+    fn next_state_from_tick(self) -> anyhow::Result<(PageState, Option<AppOperationRequest>)> {
+        Ok((PageState::TablePage(self), None))
     }
 }
 
-impl From<TablePage> for AppState {
+impl From<TablePage> for PageState {
     fn from(page: TablePage) -> Self {
-        AppState::TablePage(page)
+        PageState::TablePage(page)
     }
 }

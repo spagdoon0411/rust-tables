@@ -69,24 +69,24 @@ pub trait Renderable: Sized {
     fn next_state_from_user_action(
         self,
         action: &UserActionEvent,
-    ) -> anyhow::Result<(AppState, Option<AppOperationRequest>)>;
+    ) -> anyhow::Result<(PageState, Option<AppOperationRequest>)>;
 
     /// Consumes the current page and produces the next `AppState` in response to an
     /// async operation result.
     fn next_state_from_async_message(
         self,
         msg: &AppOperationResult,
-    ) -> anyhow::Result<(AppState, Option<AppOperationRequest>)>;
+    ) -> anyhow::Result<(PageState, Option<AppOperationRequest>)>;
 
     /// Consumes the current page and produces the next `AppState` in response to a
     /// clock tick.
-    fn next_state_from_tick(self) -> anyhow::Result<(AppState, Option<AppOperationRequest>)>;
+    fn next_state_from_tick(self) -> anyhow::Result<(PageState, Option<AppOperationRequest>)>;
 
     /// Dispatches `app_event` to the appropriate `next_state_from_*` method.
     fn next_state_from_event(
         self,
         app_event: &AppEvent,
-    ) -> anyhow::Result<(AppState, Option<AppOperationRequest>)> {
+    ) -> anyhow::Result<(PageState, Option<AppOperationRequest>)> {
         match app_event {
             AppEvent::UserAction(action) => self.next_state_from_user_action(action),
             AppEvent::AsyncMessage(msg) => self.next_state_from_async_message(msg),
@@ -96,18 +96,22 @@ pub trait Renderable: Sized {
 }
 
 // TODO: make AppState UI-agnostic?
-pub enum AppState {
+pub enum PageState {
     HomePage(HomePage),
     TablePage(TablePage),
     Exited,
 }
 
-impl AppState {
+pub struct AppState {
+    pub page_state: PageState,
+}
+
+impl PageState {
     pub fn draw(&mut self, frame: &mut Frame) {
         match self {
-            AppState::HomePage(page) => page.draw(frame),
-            AppState::TablePage(page) => page.draw(frame),
-            AppState::Exited => (),
+            PageState::HomePage(page) => page.draw(frame),
+            PageState::TablePage(page) => page.draw(frame),
+            PageState::Exited => (),
         }
     }
 
@@ -116,9 +120,9 @@ impl AppState {
         event_stream: &mut EventStream,
     ) -> anyhow::Result<UserActionEvent> {
         match self {
-            AppState::HomePage(page) => page.collect_action(event_stream).await,
-            AppState::TablePage(page) => page.collect_action(event_stream).await,
-            AppState::Exited => anyhow::bail!("should not have encountered Exited app state"),
+            PageState::HomePage(page) => page.collect_action(event_stream).await,
+            PageState::TablePage(page) => page.collect_action(event_stream).await,
+            PageState::Exited => anyhow::bail!("should not have encountered Exited app state"),
         }
     }
 
@@ -126,14 +130,14 @@ impl AppState {
         self,
         app_event: &AppEvent,
         terminal: &mut DefaultTerminal,
-    ) -> anyhow::Result<(AppState, Option<AppOperationRequest>)> {
+    ) -> anyhow::Result<(PageState, Option<AppOperationRequest>)> {
         let current_kind = discriminant(&self);
 
         // Obtain next state and possible async requests=
         let (next_state, request) = match self {
-            AppState::HomePage(page) => page.next_state_from_event(app_event),
-            AppState::TablePage(page) => page.next_state_from_event(app_event),
-            AppState::Exited => anyhow::bail!("should not have encountered Exited app state"),
+            PageState::HomePage(page) => page.next_state_from_event(app_event),
+            PageState::TablePage(page) => page.next_state_from_event(app_event),
+            PageState::Exited => anyhow::bail!("should not have encountered Exited app state"),
         }?;
 
         // Clear terminal on page changes

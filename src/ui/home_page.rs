@@ -13,7 +13,7 @@ use ratatui::{
 use crate::transactions::{
     AppOperationRequest, AppOperationResult, CreateTableInput, DeleteTableInput,
 };
-use crate::ui::{AppState, Renderable, ScrollDirection, UserActionEvent};
+use crate::ui::{PageState, Renderable, ScrollDirection, UserActionEvent};
 use crate::{tables::TableSchema, transactions::RetrieveTablesOutput};
 
 use super::table_page::TablePage;
@@ -335,7 +335,7 @@ impl Renderable for HomePage {
     fn next_state_from_user_action(
         mut self,
         action: &UserActionEvent,
-    ) -> anyhow::Result<(AppState, Option<AppOperationRequest>)> {
+    ) -> anyhow::Result<(PageState, Option<AppOperationRequest>)> {
         match action {
             UserActionEvent::Scroll(ScrollDirection::Up | ScrollDirection::Down) => {
                 if let TableList::Loaded {
@@ -346,32 +346,32 @@ impl Renderable for HomePage {
                 {
                     list_state.select(Some(*selected));
                 }
-                Ok((AppState::HomePage(self), None))
+                Ok((PageState::HomePage(self), None))
             }
             UserActionEvent::ViewTable { table } => {
-                Ok((AppState::TablePage(TablePage::new(table.id.clone())), None))
+                Ok((PageState::TablePage(TablePage::new(table.id.clone())), None))
             }
             UserActionEvent::DeleteTable { table } => Ok((
-                AppState::HomePage(self),
+                PageState::HomePage(self),
                 Some(AppOperationRequest::DeleteTable(DeleteTableInput {
                     table_id: table.id.clone(),
                 })),
             )),
             UserActionEvent::CreateTable { name } => Ok((
-                AppState::HomePage(self),
+                PageState::HomePage(self),
                 Some(AppOperationRequest::CreateTable(CreateTableInput {
                     name: name.clone(),
                 })),
             )),
-            UserActionEvent::Escape => Ok((AppState::Exited, None)),
-            _ => Ok((AppState::HomePage(self), None)),
+            UserActionEvent::Escape => Ok((PageState::Exited, None)),
+            _ => Ok((PageState::HomePage(self), None)),
         }
     }
 
     fn next_state_from_async_message(
         mut self,
         msg: &AppOperationResult,
-    ) -> anyhow::Result<(AppState, Option<AppOperationRequest>)> {
+    ) -> anyhow::Result<(PageState, Option<AppOperationRequest>)> {
         match msg {
             AppOperationResult::RetrieveTables(result) => match result {
                 Ok(RetrieveTablesOutput { tables }) => {
@@ -411,24 +411,24 @@ impl Renderable for HomePage {
             },
         }
 
-        Ok((AppState::HomePage(self), None))
+        Ok((PageState::HomePage(self), None))
     }
 
-    fn next_state_from_tick(mut self) -> anyhow::Result<(AppState, Option<AppOperationRequest>)> {
+    fn next_state_from_tick(mut self) -> anyhow::Result<(PageState, Option<AppOperationRequest>)> {
         let TableList::NotRequested = self.table_list else {
-            return Ok((AppState::HomePage(self), None));
+            return Ok((PageState::HomePage(self), None));
         };
 
         self.table_list = TableList::Loading;
         Ok((
-            AppState::HomePage(self),
+            PageState::HomePage(self),
             Some(AppOperationRequest::RetrieveTables),
         ))
     }
 }
 
-impl From<HomePage> for AppState {
+impl From<HomePage> for PageState {
     fn from(page: HomePage) -> Self {
-        AppState::HomePage(page)
+        PageState::HomePage(page)
     }
 }
