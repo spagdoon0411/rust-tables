@@ -10,7 +10,7 @@ use ratatui::{
 
 use crate::tables::TableId;
 use crate::transactions::{AppOperationRequest, AppOperationResult};
-use crate::ui::{AppState, RenderableAppPage, ScrollDirection, UserActionEvent};
+use crate::ui::{AppState, Renderable, ScrollDirection, UserActionEvent};
 
 use super::home_page::HomePage;
 
@@ -28,7 +28,7 @@ impl TablePage {
     }
 }
 
-impl RenderableAppPage for TablePage {
+impl Renderable for TablePage {
     fn draw(&mut self, frame: &mut Frame) {
         let id_text = format!("table page {}", self.table_id.0);
         let key_text = match self.last_key {

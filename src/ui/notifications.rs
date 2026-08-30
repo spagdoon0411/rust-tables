@@ -24,7 +24,7 @@ pub struct Notif {
     level: NotifLevel,
 }
 
-pub struct NotifList {
+pub struct NotifListState {
     notifs: Vec<Notif>,
 
     // Debug, notifications, warnings, errors
@@ -35,9 +35,9 @@ pub struct NotifList {
     focus: NotifListFocus,
 }
 
-impl NotifList {
+impl NotifListState {
     fn new(self) -> Self {
-        NotifList {
+        NotifListState {
             notifs: vec![],
             counts: (0, 0, 0, 0),
             focus: NotifListFocus::UnfocusedCollapsed,
@@ -130,7 +130,7 @@ fn bottom_right_rect(frame_area: Rect, width: u16, height: u16) -> Rect {
 
 // Four-number summary of debug, warning, recoverable-error, and
 // unrecoverable-error notif counts, right-aligned.
-fn default_unfocused_collapsed_notif_list(state: &NotifList) -> (Paragraph<'static>, Rect) {
+fn default_unfocused_collapsed_notif_list(state: &NotifListState) -> (Paragraph<'static>, Rect) {
     let text = format_counts(&state.counts);
     let width = text.chars().count() as u16;
     (
@@ -142,7 +142,7 @@ fn default_unfocused_collapsed_notif_list(state: &NotifList) -> (Paragraph<'stat
 // Borderless list of the most recent notifs (newest first), capped at
 // MAX_DISPLAYED_NOTIFS with an upward-arrow indicator in the heading when
 // more exist, followed by the count bar.
-fn default_unfocused_displaying_notif_list(state: &NotifList) -> (Paragraph<'static>, Rect) {
+fn default_unfocused_displaying_notif_list(state: &NotifListState) -> (Paragraph<'static>, Rect) {
     let has_more = state.notifs.len() > MAX_DISPLAYED_NOTIFS;
     let heading = if has_more {
         "Notifications \u{2191}"
@@ -178,7 +178,7 @@ fn default_unfocused_displaying_notif_list(state: &NotifList) -> (Paragraph<'sta
     )
 }
 
-fn default_focused_notif_list(_state: &NotifList) -> (Paragraph<'static>, Rect) {
+fn default_focused_notif_list(_state: &NotifListState) -> (Paragraph<'static>, Rect) {
     // Full scrollable browser: needs its own interaction model (scrolling,
     // selection, wrapping toggle) before it can be designed properly.
     todo!("design the focused notif browser")
@@ -197,7 +197,7 @@ fn default_focused_notif_list(_state: &NotifList) -> (Paragraph<'static>, Rect) 
 //
 // Returns the rendered component along with its rect, positioned in the bottom-right corner of
 // `frame_area`, for the caller's draw function to render into place.
-fn default_notif_list(frame_area: Rect, notifs: &NotifList) -> (Paragraph<'static>, Rect) {
+fn default_notif_list(frame_area: Rect, notifs: &NotifListState) -> (Paragraph<'static>, Rect) {
     let (widget, size) = match notifs.focus {
         NotifListFocus::UnfocusedCollapsed => default_unfocused_collapsed_notif_list(notifs),
         NotifListFocus::UnfocusedDisplaying => default_unfocused_displaying_notif_list(notifs),

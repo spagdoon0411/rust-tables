@@ -54,7 +54,7 @@ pub enum AppEvent {
 
 /// An app state that can be projected onto a UI page. Note that the Exited state
 /// cannot be projected.
-pub trait RenderableAppPage: Into<AppState> + Sized {
+pub trait Renderable: Sized {
     fn draw(&mut self, frame: &mut Frame);
 
     async fn collect_action(

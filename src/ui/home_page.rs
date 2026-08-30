@@ -13,7 +13,7 @@ use ratatui::{
 use crate::transactions::{
     AppOperationRequest, AppOperationResult, CreateTableInput, DeleteTableInput,
 };
-use crate::ui::{AppState, RenderableAppPage, ScrollDirection, UserActionEvent};
+use crate::ui::{AppState, Renderable, ScrollDirection, UserActionEvent};
 use crate::{tables::TableSchema, transactions::RetrieveTablesOutput};
 
 use super::table_page::TablePage;
@@ -274,7 +274,7 @@ impl HomePage {
     }
 }
 
-impl RenderableAppPage for HomePage {
+impl Renderable for HomePage {
     fn draw(&mut self, frame: &mut Frame) {
         match &mut self.table_list {
             TableList::NotRequested | TableList::Loading => Self::draw_loading(frame),
