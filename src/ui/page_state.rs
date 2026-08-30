@@ -1,11 +1,9 @@
 pub use super::home_page::HomePage;
 pub use super::table_page::TablePage;
-pub use super::{AppEvent, Renderable, UserActionEvent};
+pub use super::{Renderable, UserActionEvent};
 
-use anyhow::Context;
 use crossterm::event::EventStream;
-use ratatui::{DefaultTerminal, Frame};
-use std::mem::discriminant;
+use ratatui::Frame;
 
 use crate::transactions::{AppOperationRequest, AppOperationResult};
 
@@ -66,25 +64,5 @@ impl Renderable for PageState {
             PageState::TablePage(page) => page.next_state_from_tick(),
             PageState::Exited => anyhow::bail!("should not have encountered Exited app state"),
         }
-    }
-}
-
-impl PageState {
-    pub fn transition_app_state(
-        self,
-        app_event: &AppEvent,
-        terminal: &mut DefaultTerminal,
-    ) -> anyhow::Result<(PageState, Option<AppOperationRequest>)> {
-        let current_kind = discriminant(&self);
-
-        let (next_state, request) = self.next_state_from_event(app_event)?;
-
-        // Clear terminal on page changes
-        let next_kind = discriminant(&next_state);
-        if next_kind != current_kind {
-            terminal.clear().context("while clearing terminal")?;
-        }
-
-        Ok((next_state, request))
     }
 }

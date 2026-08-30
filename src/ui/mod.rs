@@ -6,6 +6,7 @@ mod table_page;
 
 pub use app_state::AppState;
 pub use home_page::HomePage;
+pub use notifications::NotifListState;
 pub use page_state::PageState;
 
 use crossterm::event::EventStream;

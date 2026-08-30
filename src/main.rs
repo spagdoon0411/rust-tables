@@ -5,7 +5,7 @@ mod ui;
 
 use crate::{
     transactions::{AppOperationResult, launch},
-    ui::{AppState, HomePage, PageState, Renderable},
+    ui::{AppState, PageState, Renderable},
 };
 use crossterm::{
     event::{
@@ -51,11 +51,10 @@ async fn app(pool: Pool<Sqlite>) -> anyhow::Result<()> {
     let mut terminal = ratatui::init();
     let keyboard_enhancement_supported = terminal_specific_config()?;
 
-    let page_state = PageState::HomePage(HomePage::new());
-    let mut app_state = AppState { page_state };
-
     let mut tick = time::interval(Duration::from_millis(100));
     let (tx, mut rx) = mpsc::channel::<AppOperationResult>(100);
+
+    let mut app_state = AppState::new();
 
     loop {
         // Terminal states are never projected to the terminal and never
@@ -65,20 +64,18 @@ async fn app(pool: Pool<Sqlite>) -> anyhow::Result<()> {
         }
 
         // Project app state onto terminal
-        terminal.draw(|frame| app_state.page_state.draw(frame))?;
+        terminal.draw(|frame| app_state.draw(frame))?;
 
         // Race receipts of AppEvents
         let app_event = tokio::select! {
-            /* UserAction */ action = app_state.page_state.collect_action(&mut event_stream) => AppEvent::UserAction(action?),
+            /* UserAction */ action = app_state.collect_action(&mut event_stream) => AppEvent::UserAction(action?),
             /* AsyncMessage */ Some(msg) = rx.recv() => AppEvent::AsyncMessage(msg),
             /* Tick */ _ = tick.tick() => AppEvent::Tick,
         };
 
         // Transition app state, clearing the terminal when necessary
         let request;
-        (app_state.page_state, request) = app_state
-            .page_state
-            .transition_app_state(&app_event, &mut terminal)?;
+        (app_state, request) = app_state.transition_app_state(&app_event, &mut terminal)?;
 
         if let Some(request) = request {
             launch(tx.clone(), pool.clone(), request);

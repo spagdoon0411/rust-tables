@@ -43,7 +43,7 @@ pub struct NotifListState {
 }
 
 impl NotifListState {
-    fn new(self) -> Self {
+    pub fn new() -> Self {
         NotifListState {
             notifs: vec![],
             counts: (0, 0, 0, 0),
@@ -52,7 +52,7 @@ impl NotifListState {
     }
 
     // Push a notification on the state level.
-    fn notify_user(mut self, level: NotifLevel, content: String) {
+    pub fn notify_user(mut self, level: NotifLevel, content: String) {
         match level {
             NotifLevel::Debug => self.counts.0 += 1,
             NotifLevel::Warning => self.counts.1 += 1,
