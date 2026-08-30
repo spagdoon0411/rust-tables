@@ -10,7 +10,7 @@ use ratatui::{
 
 use crate::tables::TableId;
 use crate::transactions::{AppOperationRequest, AppOperationResult};
-use crate::ui::{PageState, Renderable, ScrollDirection, UserActionEvent};
+use crate::ui::{Renderable, ScrollDirection, UserActionEvent, page_state::PageState};
 
 use super::home_page::HomePage;
 
