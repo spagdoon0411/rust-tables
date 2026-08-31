@@ -76,7 +76,7 @@ pub enum AppOperationResult {
 
 /// Dispatches `request` to its operation-specific function, passing the
 /// whole input struct rather than unpacked fields.
-async fn execute_request(pool: Pool<Sqlite>, request: AppOperationRequest) -> AppOperationResult {
+async fn dispatch_request(pool: Pool<Sqlite>, request: AppOperationRequest) -> AppOperationResult {
     match request {
         AppOperationRequest::CreateTable(input) => {
             AppOperationResult::CreateTable(create_table(pool, input).await)
@@ -90,16 +90,34 @@ async fn execute_request(pool: Pool<Sqlite>, request: AppOperationRequest) -> Ap
     }
 }
 
-/// Spawns `request`'s execution against `pool` and sends its result over
-/// `tx` once complete, without blocking the caller.
-pub fn launch(
+const RESULT_CHANNEL_CAPACITY: usize = 100;
+
+/// Owns the channel that async operation results are streamed back over,
+/// and the ability to spawn requests that feed into it.
+pub struct AsyncRequestStream {
     tx: mpsc::Sender<AppOperationResult>,
-    pool: Pool<Sqlite>,
-    request: AppOperationRequest,
-) {
-    tokio::spawn(async move {
-        // TODO: may be incomplete on a UI shutdown (app exits; Tokio tasks are killed)
-        let result = execute_request(pool, request).await;
-        let _ = tx.send(result).await;
-    });
+    rx: mpsc::Receiver<AppOperationResult>,
+}
+
+impl AsyncRequestStream {
+    pub fn new() -> Self {
+        let (tx, rx) = mpsc::channel(RESULT_CHANNEL_CAPACITY);
+        Self { tx, rx }
+    }
+
+    /// Spawns `request`'s execution against `pool` and sends its result over
+    /// the stream's channel once complete, without blocking the caller.
+    pub fn execute_request(&self, pool: Pool<Sqlite>, request: AppOperationRequest) {
+        let tx = self.tx.clone();
+        tokio::spawn(async move {
+            // TODO: may be incomplete on a UI shutdown (app exits; Tokio tasks are killed)
+            let result = dispatch_request(pool, request).await;
+            let _ = tx.send(result).await;
+        });
+    }
+
+    /// Awaits the next completed operation's result.
+    pub async fn recv(&mut self) -> Option<AppOperationResult> {
+        self.rx.recv().await
+    }
 }
