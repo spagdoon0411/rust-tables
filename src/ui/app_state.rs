@@ -1,4 +1,5 @@
-use super::Renderable;
+use super::AppStateTransition;
+use super::RenderRatatui;
 use super::UserActionEvent;
 use super::home_page::HomePage;
 use super::page_state::PageState;
@@ -9,7 +10,6 @@ use crate::transactions::{AppOperationRequest, AppOperationResult};
 use crate::ui::notifications::NotifListState;
 
 use anyhow::Context;
-use crossterm::event::EventStream;
 use ratatui::{DefaultTerminal, Frame};
 use std::mem::discriminant;
 
@@ -45,10 +45,7 @@ impl AppState {
     }
 }
 
-impl Renderable for AppState {
-    // The app's transitions are driven entirely by its inner page state.
-    type Next = AppState;
-
+impl RenderRatatui for AppState {
     fn draw(&mut self, frame: &mut Frame) {
         self.notif_list_state.draw(frame);
         self.page_state.draw(frame);
@@ -56,11 +53,17 @@ impl Renderable for AppState {
 
     async fn collect_action(
         &mut self,
-        event_stream: &mut EventStream,
+        event_stream: &mut crossterm::event::EventStream,
     ) -> anyhow::Result<UserActionEvent> {
-        self.page_state.collect_action(event_stream).await
-        // TODO: condition action source on cursor's focus
+        // TODO: collect actions from UI components using cursor focus target
+        let action = self.page_state.collect_action(event_stream).await?;
+        Ok(action)
     }
+}
+
+impl AppStateTransition for AppState {
+    // The app's transitions are driven entirely by its inner page state.
+    type Next = AppState;
 
     fn next_state_from_user_action(
         self,

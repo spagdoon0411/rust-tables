@@ -10,7 +10,7 @@ use ratatui::{
 };
 
 use crate::transactions::{AppOperationRequest, AppOperationResult};
-use crate::ui::{Renderable, UserActionEvent};
+use crate::ui::{AppStateTransition, RenderRatatui, UserActionEvent};
 
 pub enum NotifLevel {
     Debug,
@@ -68,11 +68,7 @@ impl NotifListState {
     }
 }
 
-impl Renderable for NotifListState {
-    // The notif list is an overlay, not a page: it never transitions into a
-    // different page type, only into a possibly-mutated version of itself.
-    type Next = NotifListState;
-
+impl RenderRatatui for NotifListState {
     fn draw(&mut self, frame: &mut Frame) {
         let (widget, area) = default_notif_list(frame.area(), self);
         frame.render_widget(widget, area);
@@ -97,6 +93,12 @@ impl Renderable for NotifListState {
 
         Ok(UserActionEvent::NoAction)
     }
+}
+
+impl AppStateTransition for NotifListState {
+    // The notif list is an overlay, not a page: it never transitions into a
+    // different page type, only into a possibly-mutated version of itself.
+    type Next = NotifListState;
 
     fn next_state_from_user_action(
         self,

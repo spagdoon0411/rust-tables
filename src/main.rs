@@ -5,7 +5,7 @@ mod ui;
 
 use crate::{
     transactions::{AppOperationResult, launch},
-    ui::{AppState, PageState, RatatuiUI, Renderable},
+    ui::{AppState, PageState, RatatuiUI, RenderRatatui},
 };
 use std::process::ExitCode;
 use tokio::sync::mpsc;

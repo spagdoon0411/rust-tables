@@ -114,18 +114,22 @@ impl RatatuiUI {
     }
 }
 
-/// An app state that can be projected onto a UI page. Note that the Exited state
-/// cannot be projected.
-pub trait Renderable: Sized {
-    // Valid page type(s) this page can transition into
-    type Next;
-
+/// A page that can be projected onto a ratatui terminal and read its own input
+/// off a crossterm event stream. Note that the Exited state cannot be rendered.
+pub trait RenderRatatui {
     fn draw(&mut self, frame: &mut Frame);
 
     async fn collect_action(
         &mut self,
         event_stream: &mut EventStream,
     ) -> anyhow::Result<UserActionEvent>;
+}
+
+/// Framework-agnostic transition logic: how a state evolves in response to an
+/// `AppEvent`, independent of how it's rendered or how input reaches it.
+pub trait AppStateTransition: Sized {
+    // Valid page type(s) this page can transition into
+    type Next;
 
     /// Consumes the current page and produces the next `Self::Next` in response to a
     /// user action, either with the same page type with possibly mutated fields or

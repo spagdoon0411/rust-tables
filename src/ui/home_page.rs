@@ -13,7 +13,7 @@ use ratatui::{
 use crate::transactions::{
     AppOperationRequest, AppOperationResult, CreateTableInput, DeleteTableInput,
 };
-use crate::ui::{PageState, Renderable, ScrollDirection, UserActionEvent};
+use crate::ui::{AppStateTransition, PageState, RenderRatatui, ScrollDirection, UserActionEvent};
 use crate::{tables::TableSchema, transactions::RetrieveTablesOutput};
 
 use super::table_page::TablePage;
@@ -274,9 +274,7 @@ impl HomePage {
     }
 }
 
-impl Renderable for HomePage {
-    type Next = PageState;
-
+impl RenderRatatui for HomePage {
     fn draw(&mut self, frame: &mut Frame) {
         match &mut self.table_list {
             TableList::NotRequested | TableList::Loading => Self::draw_loading(frame),
@@ -333,6 +331,10 @@ impl Renderable for HomePage {
             TableList::NotRequested | TableList::Loading => Self::collect_action_loading(key.code),
         })
     }
+}
+
+impl AppStateTransition for HomePage {
+    type Next = PageState;
 
     fn next_state_from_user_action(
         mut self,

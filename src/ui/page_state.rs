@@ -1,6 +1,6 @@
 pub use super::home_page::HomePage;
 pub use super::table_page::TablePage;
-pub use super::{Renderable, UserActionEvent};
+pub use super::{AppStateTransition, RenderRatatui, UserActionEvent};
 
 use crossterm::event::EventStream;
 use ratatui::Frame;
@@ -14,9 +14,7 @@ pub enum PageState {
     Exited,
 }
 
-impl Renderable for PageState {
-    type Next = PageState;
-
+impl RenderRatatui for PageState {
     fn draw(&mut self, frame: &mut Frame) {
         match self {
             PageState::HomePage(page) => page.draw(frame),
@@ -35,6 +33,10 @@ impl Renderable for PageState {
             PageState::Exited => anyhow::bail!("should not have encountered Exited app state"),
         }
     }
+}
+
+impl AppStateTransition for PageState {
+    type Next = PageState;
 
     fn next_state_from_user_action(
         self,
