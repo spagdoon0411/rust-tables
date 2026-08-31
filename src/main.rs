@@ -18,13 +18,9 @@ async fn app() -> anyhow::Result<()> {
 
     ui.init()?;
 
-    loop {
-        // Terminal states are never projected to the terminal and never
-        // initiate transitions.
-        if matches!(app_state.page_state, PageState::Exited) {
-            break;
-        }
-
+    // Terminal states are never projected to the terminal and never
+    // initiate transitions.
+    while !matches!(app_state.page_state, PageState::Exited) {
         // Project app state onto terminal
         ui.project(&mut app_state)?;
 
