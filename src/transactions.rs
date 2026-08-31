@@ -95,19 +95,22 @@ const RESULT_CHANNEL_CAPACITY: usize = 100;
 /// Owns the channel that async operation results are streamed back over,
 /// and the ability to spawn requests that feed into it.
 pub struct AsyncRequestStream {
+    pool: Pool<Sqlite>,
     tx: mpsc::Sender<AppOperationResult>,
     rx: mpsc::Receiver<AppOperationResult>,
 }
 
 impl AsyncRequestStream {
-    pub fn new() -> Self {
+    pub fn new(pool: Pool<Sqlite>) -> Self {
         let (tx, rx) = mpsc::channel(RESULT_CHANNEL_CAPACITY);
-        Self { tx, rx }
+        Self { pool, tx, rx }
     }
 
-    /// Spawns `request`'s execution against `pool` and sends its result over
-    /// the stream's channel once complete, without blocking the caller.
-    pub fn execute_request(&self, pool: Pool<Sqlite>, request: AppOperationRequest) {
+    /// Spawns `request`'s execution against the stream's pool and sends its
+    /// result over the stream's channel once complete, without blocking the
+    /// caller.
+    pub fn execute_request(&self, request: AppOperationRequest) {
+        let pool = self.pool.clone();
         let tx = self.tx.clone();
         tokio::spawn(async move {
             // TODO: may be incomplete on a UI shutdown (app exits; Tokio tasks are killed)

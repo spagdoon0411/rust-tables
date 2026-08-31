@@ -12,10 +12,9 @@ use ui::AppEvent;
 
 /// Primary application, evolving valid initial user data according to terminal input.
 async fn app() -> anyhow::Result<()> {
-    let pool = repository::init_user_data().await?;
     let mut ui = RatatuiUI::new();
     let mut app_state = AppState::new();
-    let mut async_requests = AsyncRequestStream::new();
+    let mut async_requests = AsyncRequestStream::new(repository::init_user_data().await?);
 
     ui.init()?;
 
@@ -41,7 +40,7 @@ async fn app() -> anyhow::Result<()> {
         (app_state, request) = app_state.transition_app_state(&app_event, &mut ui.terminal)?;
 
         if let Some(request) = request {
-            async_requests.execute_request(pool.clone(), request);
+            async_requests.execute_request(request);
         }
     }
 
