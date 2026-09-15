@@ -55,8 +55,8 @@ impl TableBrowser {
         // Rendering the list above updates list_state's scroll offset to keep the
         // selection in view, so it's read back here to drive the scrollbar's position.
         if self.items.len() > visible_lines {
-            let mut scrollbar_state =
-                ScrollbarState::new(self.items.len()).position(self.list_state.offset());
+            let mut scrollbar_state = ScrollbarState::new(self.items.len() - visible_lines + 1)
+                .position(self.list_state.offset());
 
             let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
                 .begin_symbol(Some("↑"))
