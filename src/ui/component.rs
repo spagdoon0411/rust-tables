@@ -1,6 +1,6 @@
 use ratatui::{Frame, layout::Rect};
 
-use crate::events::AppEvent;
+use crate::ui::events::AppEvent;
 
 /// A piece of UI that knows how to draw itself into a given area of the frame.
 pub trait Component {

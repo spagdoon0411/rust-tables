@@ -8,7 +8,7 @@ use ratatui::{
     },
 };
 
-use crate::{events::AppEvent, ui::Component};
+use crate::ui::{Component, events::AppEvent};
 
 pub struct TableBrowser {
     items: Vec<String>,
