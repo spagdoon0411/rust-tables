@@ -1,13 +1,17 @@
 use ratatui::{
     Frame,
-    layout::{Constraint, Layout, Rect},
+    layout::{Alignment, Constraint, Layout, Margin, Rect},
+    text::{Line, Span},
+    widgets::{
+        Block, List, ListState, Padding, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
+    },
 };
 
-use crate::ui::{Component, TablePreview, TablesList};
+use crate::ui::Component;
 
 pub struct TableBrowser {
-    list: TablesList,
-    preview: TablePreview,
+    items: Vec<String>,
+    list_state: ListState,
 }
 
 impl TableBrowser {
@@ -16,9 +20,72 @@ impl TableBrowser {
 
     pub fn new(items: Vec<String>) -> Self {
         Self {
-            list: TablesList::new(items),
-            preview: TablePreview::new(String::new()),
+            items,
+            list_state: ListState::default(),
         }
+    }
+
+    /// The name of the currently selected table, if any.
+    fn selected(&self) -> Option<&str> {
+        self.list_state
+            .selected()
+            .and_then(|i| self.items.get(i))
+            .map(String::as_str)
+    }
+
+    fn render_list(&mut self, frame: &mut Frame, area: Rect) {
+        // Shift the title right by one column, filling the vacated column with the
+        // border's own horizontal glyph so it reads as a continuation of the border
+        // rather than a gap.
+        let block = Block::bordered()
+            .title(Line::from(vec![Span::raw("─"), Span::raw("Tables")]))
+            .padding(Padding::left(1));
+        let visible_lines = block.inner(area).height as usize;
+
+        let list = List::new(self.items.iter().cloned())
+            .block(block)
+            .highlight_symbol("> ");
+
+        frame.render_stateful_widget(list, area, &mut self.list_state);
+
+        // Rendering the list above updates list_state's scroll offset to keep the
+        // selection in view, so it's read back here to drive the scrollbar's position.
+        if self.items.len() > visible_lines {
+            let mut scrollbar_state =
+                ScrollbarState::new(self.items.len()).position(self.list_state.offset());
+
+            let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                .begin_symbol(Some("↑"))
+                .end_symbol(Some("↓"));
+
+            frame.render_stateful_widget(
+                scrollbar,
+                area.inner(Margin {
+                    vertical: 1,
+                    horizontal: 0,
+                }),
+                &mut scrollbar_state,
+            );
+        }
+    }
+
+    fn render_preview(&mut self, frame: &mut Frame, area: Rect) {
+        // Shift the title right by one column, filling the vacated column with the
+        // border's own horizontal glyph so it reads as a continuation of the border
+        // rather than a gap.
+        let block = Block::bordered().title(Line::from(vec![Span::raw("─"), Span::raw("Preview")]));
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
+        let [_, middle, _] = Layout::vertical([
+            Constraint::Fill(1),
+            Constraint::Length(1),
+            Constraint::Fill(1),
+        ])
+        .areas(inner);
+
+        let name = Paragraph::new(self.selected().unwrap_or_default()).alignment(Alignment::Center);
+        frame.render_widget(name, middle);
     }
 }
 
@@ -38,11 +105,7 @@ impl Component for TableBrowser {
             Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
                 .areas(bounded);
 
-        if let Some(name) = self.list.selected() {
-            self.preview.set_name(name);
-        }
-
-        self.list.render(frame, left);
-        self.preview.render(frame, right);
+        self.render_list(frame, left);
+        self.render_preview(frame, right);
     }
 }
