@@ -1,3 +1,4 @@
+use crossterm::event::KeyCode;
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Layout, Margin, Rect},
@@ -7,7 +8,7 @@ use ratatui::{
     },
 };
 
-use crate::ui::Component;
+use crate::{events::AppEvent, ui::Component};
 
 pub struct TableBrowser {
     items: Vec<String>,
@@ -19,10 +20,13 @@ impl TableBrowser {
     pub const MAX_HEIGHT: u16 = 16;
 
     pub fn new(items: Vec<String>) -> Self {
-        Self {
-            items,
-            list_state: ListState::default(),
-        }
+        let list_state = if items.is_empty() {
+            ListState::default()
+        } else {
+            ListState::default().with_selected(Some(0))
+        };
+
+        Self { items, list_state }
     }
 
     /// The name of the currently selected table, if any.
@@ -107,5 +111,25 @@ impl Component for TableBrowser {
 
         self.render_list(frame, left);
         self.render_preview(frame, right);
+    }
+
+    fn children(&mut self) -> Option<Vec<&mut dyn Component>> {
+        None
+    }
+
+    fn handle_event(&mut self, event: AppEvent) {
+        match event {
+            AppEvent::KeyPress(key) => match key {
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.list_state.select_previous();
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    self.list_state.select_next();
+                }
+                _ => {}
+            },
+            // main's event loop intercepts Exit before it ever reaches a component.
+            AppEvent::Exit => {}
+        }
     }
 }
