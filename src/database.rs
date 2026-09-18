@@ -32,15 +32,37 @@ pub enum DatabaseError {
     ConnectionFailed(#[from] std::io::Error),
 }
 
+#[derive(Debug, Clone, PartialEq, sqlx::FromRow)]
+pub struct TableSchemaRow {
+    pub id: String,
+    pub name: String,
+}
+
 impl Database {
     async fn verify_application_tables(pool: &Pool<Sqlite>) -> bool {
-        let count: Result<(i64,), _> = sqlx::query_as(
-            "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
-        )
-        .fetch_one(pool)
-        .await;
+        #[derive(sqlx::FromRow)]
+        struct ColumnInfo {
+            name: String,
+            r#type: String,
+        }
 
-        matches!(count, Ok((0,)))
+        let columns: Vec<ColumnInfo> = match sqlx::query_as("PRAGMA table_info(TableSchema)")
+            .fetch_all(pool)
+            .await
+        {
+            Ok(columns) => columns,
+            Err(_) => return false,
+        };
+
+        let expected_columns = [("id", "TEXT"), ("name", "TEXT")];
+
+        columns.len() == expected_columns.len()
+            && columns
+                .iter()
+                .zip(expected_columns.iter())
+                .all(|(column, (name, ty))| {
+                    column.name == *name && column.r#type.eq_ignore_ascii_case(ty)
+                })
     }
 
     async fn create_database_file(path: &Path) -> Result<(), DatabaseError> {
@@ -52,7 +74,7 @@ impl Database {
             .filename(path)
             .create_if_missing(true);
 
-        sqlx::sqlite::SqlitePoolOptions::new()
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
             .connect_with(options)
             .await
             .map_err(|e| {
@@ -60,9 +82,10 @@ impl Database {
                     std::io::ErrorKind::Other,
                     e.to_string(),
                 ))
-            })?
-            .close()
-            .await;
+            })?;
+
+        Database::init_meta_tables(&pool).await?;
+        pool.close().await;
 
         Ok(())
     }
@@ -104,6 +127,25 @@ impl Database {
         })
     }
 
+    async fn init_meta_tables(pool: &Pool<Sqlite>) -> Result<(), DatabaseError> {
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS TableSchema (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL
+            )",
+        )
+        .execute(pool)
+        .await
+        .map_err(|e| {
+            DatabaseError::ConnectionFailed(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            ))
+        })?;
+
+        Ok(())
+    }
+
     pub async fn connect_with_retry(path: &Path) -> Result<Database, DatabaseError> {
         let mut last_err = None;
 
@@ -130,6 +172,18 @@ impl Database {
 
     pub async fn try_new(path: &Path) -> Result<Database, DatabaseError> {
         Database::connect_with_retry(path).await
+    }
+
+    pub async fn retrieve_tables(&self) -> Result<Vec<TableSchemaRow>, DatabaseError> {
+        sqlx::query_as::<_, TableSchemaRow>("SELECT id, name FROM TableSchema")
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| {
+                DatabaseError::ConnectionFailed(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                ))
+            })
     }
 }
 

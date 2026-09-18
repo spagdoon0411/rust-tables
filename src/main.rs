@@ -1,12 +1,18 @@
+mod clients;
 mod database;
+mod dispatcher;
+mod store;
 mod ui;
 
 use clap::Parser;
 use std::path::PathBuf;
+use std::sync::Arc;
+use tokio_util::sync::CancellationToken;
 
-use crate::database::Database;
-use crate::ui::events::AppEvent;
-use crate::ui::{Component, RatatuiUI, TableBrowser};
+use crate::clients::{AppAPIClient, SQLiteAPIClient};
+use crate::dispatcher::Dispatcher;
+use crate::store::SharedStore;
+use crate::ui::{Component, RatatuiUI, SharedContext, TableBrowser};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -18,25 +24,57 @@ struct Args {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
-    let _ = Database::try_new(&args.path).await?;
+
     let mut ui = RatatuiUI::new();
+    let mut dispatcher = Dispatcher::new();
+    let mut client = SQLiteAPIClient::try_new(&args.path, dispatcher.action_tx.clone()).await?;
+    let store = SharedStore::new();
+    let context = SharedContext::new(
+        store.clone(),
+        client.request_tx.clone(),
+        dispatcher.action_tx.clone(),
+    );
 
-    // Component tree defining the application
-    let mut app = TableBrowser::new((1..32).map(|i| format!("Table {}", i)).collect());
+    // Spawn and join dispatch and UI tasks:
 
-    let mut running = true;
-    while running {
-        ui.project(&mut app)?;
+    let shutdown = CancellationToken::new();
 
-        tokio::select! {
-            event = ui.next_event() => {
-                match event? {
-                    AppEvent::Exit => running = false,
-                    event => app.propagate_event(event),
+    // Dispatch task
+    let dispatch_shutdown = shutdown.clone();
+    let dispatch_task = tokio::spawn(async move {
+        while !dispatch_shutdown.is_cancelled() {
+            tokio::select! {
+                request = client.next_request() => {
+                    client.handle_request(request);
                 }
+                action = dispatcher.next_action() => {
+                    store.handle_action(action);
+                }
+                _ = dispatch_shutdown.cancelled() => {}
             }
         }
-    }
+
+        Ok::<(), anyhow::Error>(())
+    });
+
+    // UI task
+    let ui_shutdown = shutdown.clone();
+    let ui_task = tokio::spawn(async move {
+        let mut app = TableBrowser::new(Arc::clone(&context));
+
+        let on_exit = || ui_shutdown.cancel();
+        while !ui_shutdown.is_cancelled() {
+            let event = ui.next_event(on_exit).await?;
+            app.propagate_event(event);
+            ui.project(&mut app)?;
+        }
+
+        Ok::<(), anyhow::Error>(())
+    });
+
+    let (dispatch_result, ui_result) = tokio::join!(dispatch_task, ui_task);
+    dispatch_result??;
+    ui_result??;
 
     Ok(())
 }
