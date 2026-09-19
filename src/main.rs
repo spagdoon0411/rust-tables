@@ -41,6 +41,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Dispatch task
     let dispatch_shutdown = shutdown.clone();
+    let dispatch_store = store.clone();
     let dispatch_task = tokio::spawn(async move {
         while !dispatch_shutdown.is_cancelled() {
             tokio::select! {
@@ -48,7 +49,7 @@ async fn main() -> anyhow::Result<()> {
                     client.handle_request(request);
                 }
                 action = dispatcher.next_action() => {
-                    store.handle_action(action);
+                    dispatch_store.handle_action(action);
                 }
                 _ = dispatch_shutdown.cancelled() => {}
             }
@@ -59,12 +60,16 @@ async fn main() -> anyhow::Result<()> {
 
     // UI task
     let ui_shutdown = shutdown.clone();
+    let ui_store = store.clone();
     let ui_task = tokio::spawn(async move {
         let mut app = TableBrowser::new(Arc::clone(&context));
 
         let on_exit = || ui_shutdown.cancel();
         while !ui_shutdown.is_cancelled() {
-            let event = ui.next_event(on_exit).await?;
+            let event = tokio::select! {
+                ui_event = ui.next_event(on_exit) => ui_event?,
+                store_event = ui_store.next_event() => store_event,
+            };
             app.propagate_event(event);
             ui.project(&mut app)?;
         }

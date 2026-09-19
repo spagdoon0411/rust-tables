@@ -5,5 +5,6 @@ pub enum AppEvent {
     Init,
     KeyPress(KeyCode),
     Tick,
+    StoreChanged,
     Exit,
 }
