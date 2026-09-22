@@ -68,18 +68,18 @@ impl RatatuiUI {
     }
 
     pub async fn next_event(&mut self, on_exit: impl FnOnce()) -> anyhow::Result<AppEvent> {
-        let event = if self.initialized {
-            tokio::select! {
-                event = Self::next_key_event(&mut self.events) => event?,
-                event = Self::next_tick_event(&mut self.ticker) => event,
-            }
-        } else {
+        if !self.initialized {
             self.initialized = true;
-            AppEvent::Init
+            return Ok(AppEvent::Init);
+        }
+
+        let event = tokio::select! {
+            event = Self::next_key_event(&mut self.events) => event?,
+            event = Self::next_tick_event(&mut self.ticker) => event,
         };
 
         if let AppEvent::Exit = event {
-            on_exit();
+            on_exit()
         }
 
         Ok(event)
